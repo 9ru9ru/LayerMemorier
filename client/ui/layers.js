@@ -102,8 +102,8 @@ LMUI.layers = (() => {
   document.addEventListener('click', async e => {
     const inTab = e.target.closest('#tab-layers');
     if (!inTab) return;
-    const caret = e.target.closest('.caret');
-    const rowEl = e.target.closest('.layer-row');
+    const caret = e.target.closest('#tab-layers .caret');
+    const rowEl = e.target.closest('#tab-layers .layer-row');
     if (caret && rowEl && rowEl.classList.contains('group')) {
       const id = Number(rowEl.dataset.layer);
       if (LMState.collapsed.has(id)) LMState.collapsed.delete(id); else LMState.collapsed.add(id);
@@ -120,7 +120,7 @@ LMUI.layers = (() => {
       try { await LMHost.call('selectLayers', LMState.selectedIds); } catch (err) { LMApp.status(err.message); }
       return;
     }
-    const btn = e.target.closest('[data-action]');
+    const btn = e.target.closest('#tab-layers [data-action]');
     if (!btn) return;
     if (btn.dataset.action === 'marks-clear') {
       const ids = LMState.selectedIds.slice();
@@ -139,7 +139,7 @@ LMUI.layers = (() => {
   document.addEventListener('change', e => {
     const box = e.target.closest('#tab-layers .mark-panel input[data-category]');
     if (!box) return;
-    setMark(LMState.selectedIds.slice(), box.dataset.category, box.dataset.value, box.checked);
+    setMark(LMState.selectedIds.slice(), box.dataset.category, box.dataset.value, box.checked).catch(e => LMApp.status(e.message));
   });
 
   return { render, setMark };
