@@ -72,7 +72,7 @@ LMUI.export = (() => {
     let summary = '';
     if (LMState.summary && !LMState.exporting) {
       const s = LMState.summary;
-      summary = `<div class="summary"><b>${s.done - s.failures.length}개 성공</b>${s.failures.length ? `, ${s.failures.length}개 실패<ul class="err">${s.failures.map(f => `<li>${esc(f.path)}: ${esc(f.error)}</li>`).join('')}</ul>` : ''}${s.aborted ? ' (중단됨)' : ''}</div>`;
+      summary = `<div class="summary"><b>${s.succeeded}개 성공</b>${s.failures.length ? `, ${s.failures.length}개 실패<ul class="err">${s.failures.map(f => `<li>${esc(f.path)}: ${esc(f.error)}</li>`).join('')}</ul>` : ''}${s.aborted ? ' (중단됨)' : ''}</div>`;
     }
     return `<div class="row">
       <button class="primary" data-action="export-run" ${canRun ? '' : 'disabled'}>내보내기</button>
@@ -93,17 +93,19 @@ LMUI.export = (() => {
     LMState.progress = { done: 0, total: pv.jobs.length, current: '' };
     const failures = [];
     let done = 0;
+    let succeeded = 0;
     LMApp.render();
     try {
       await LMApp.saveDocData();
       await LMHost.call('exportBegin', { layerIds: LMCore.jobs.markedLayerIds(d.marks, LMState.layers) });
-      const dest = d.destination.replace(/\\/g, '/').replace(/\/+$/, '');
+      const dest = d.destination.trim().replace(/\\/g, '/').replace(/\/+$/, '');
       for (const job of pv.jobs) {
         if (LMState.abort) break;
         LMState.progress.current = job.relativePath;
         renderProgressOnly();
         try {
           await LMHost.call('exportOne', { on: job.on, off: job.off, path: dest + '/' + job.relativePath });
+          succeeded++;
         } catch (e) {
           failures.push({ path: job.relativePath, error: e.message });
         }
@@ -116,9 +118,9 @@ LMUI.export = (() => {
     } finally {
       try { await LMHost.call('exportEnd'); } catch (e) { failures.push({ path: '(복원)', error: e.message }); }
       LMState.exporting = false;
-      LMState.summary = { done, failures, aborted: LMState.abort };
+      LMState.summary = { done, succeeded, failures, aborted: LMState.abort };
       LMState.progress = null;
-      await LMApp.refresh();
+      try { await LMApp.refresh(); } catch (e) { LMApp.status(e.message); }
     }
   }
 

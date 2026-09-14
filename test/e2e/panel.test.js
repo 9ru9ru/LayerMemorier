@@ -162,3 +162,32 @@ test('export tab blocks on name conflicts', async () => {
     p.close();
   }
 });
+
+test('export tab: a start failure reports zero successes, not a negative count', async () => {
+  const DEST = path.join(__dirname, '..', 'out', 'panel-export-start-fail');
+  fs.rmSync(DEST, { recursive: true, force: true });
+  const { byName } = buildFixture();
+  psCall('writeDocData', docDataFor(byName, DEST.replace(/\\/g, '/')));
+  const p = await freshPanel();
+  try {
+    await p.eval(`document.querySelector('#tabs [data-tab=export]').click(); true`);
+    // exportBegin만 실패하도록 LMHost.call을 페이지 안에서 스텁한다 (host.jsx는 건드리지 않는다).
+    await p.eval(`
+      window.__origLMHostCall = LMHost.call;
+      LMHost.call = (fn, arg) => fn === 'exportBegin'
+        ? Promise.reject(new Error('induced start failure'))
+        : window.__origLMHostCall(fn, arg);
+      true`);
+    await p.eval('LMUI.export.run()');
+    const summary = await p.eval('LMState.summary');
+    assert.equal(summary.succeeded, 0, 'no job ever ran, so zero succeeded');
+    assert.equal(summary.done, 0);
+    assert.deepEqual(summary.failures.map(f => f.path), ['(시작)']);
+    assert.match(await p.eval(`document.querySelector('#tab-export .summary').textContent`), /0개 성공/);
+    assert.doesNotMatch(await p.eval(`document.querySelector('#tab-export .summary').textContent`), /-1개 성공/);
+    assert.equal(fs.existsSync(DEST), false, 'exportBegin failed before any file could be written');
+  } finally {
+    await p.eval(`LMHost.call = window.__origLMHostCall; delete window.__origLMHostCall; true`);
+    p.close();
+  }
+});
