@@ -143,6 +143,9 @@ var LM = LM || {};
     sref.putIdentifier(cid('Lyr '), a.id);
     var sdesc = new ActionDescriptor();
     sdesc.putReference(cid('null'), sref);
+    // MkVs=false: without it the 'slct' action turns the target layer on, so
+    // colouring a hidden layer would silently un-hide it (same as selectLayers).
+    sdesc.putBoolean(cid('MkVs'), false);
     executeAction(cid('slct'), sdesc, DialogModes.NO);
 
     var ref = new ActionReference();
@@ -180,8 +183,35 @@ var LM = LM || {};
     return String(prop.value);
   });
 
-  LM.writeDocData = wrap(function (data) {
+  function normPath(p) { return String(p).replace(/\\/g, '/').toLowerCase(); }
+
+  // Guard for the write path: the panel says which document it believes it is
+  // writing to. Without this a stale panel view (document switched inside the
+  // 200ms debounce, or a failed refresh) would replace document B's lm:data
+  // with document A's marks, which are keyed to A's layer ids.
+  function checkExpectedDoc(expect) {
+    var d = app.activeDocument;
+    var p = null;
+    try { p = d.fullName.fsName; } catch (e) { p = null; }
+    if (expect.path) {
+      if (p && normPath(p) === normPath(expect.path)) return;
+      throw new Error('active document changed: panel expected "' + expect.path + '" but Photoshop has "' + (p ? p : d.name) + '"');
+    }
+    if (expect.name && String(expect.name) !== String(d.name)) {
+      throw new Error('active document changed: panel expected "' + expect.name + '" but Photoshop has "' + d.name + '"');
+    }
+  }
+
+  LM.writeDocData = wrap(function (a) {
     if (!hasDoc()) throw new Error('no document');
+    // Two accepted shapes: the plain document data, or the envelope
+    // { doc: {name, path}, data: {...} } the panel sends. Only the stored
+    // "data" part ever reaches XMP, so readDocData is unaffected.
+    var data = a;
+    if (a && a.doc && a.data) {
+      checkExpectedDoc(a.doc);
+      data = a.data;
+    }
     xmpLib();
     var xmp = readXmp();
     xmp.setProperty(NS, 'data', JSON.stringify(data));
@@ -218,6 +248,20 @@ var LM = LM || {};
     ensureFolder(folder.parent);
     if (!folder.create()) throw new Error('cannot create folder: ' + folder.fsName);
   }
+
+  // Pre-flight for the export tab (spec section 9): create the output folder
+  // once and prove it is writable, so a bad path fails with one message before
+  // any job starts instead of once per variation.
+  LM.ensureDestination = wrap(function (a) {
+    if (!a || !a.path) throw new Error('no destination path');
+    var folder = new Folder(a.path);
+    ensureFolder(folder);
+    var probe = new File(folder.fsName + '/lm_write_test.tmp');
+    if (!probe.open('w')) throw new Error('cannot write in folder: ' + folder.fsName);
+    probe.close();
+    probe.remove();
+    return { ok: true };
+  });
 
   function saveForWebPng24(file) {
     var desc = new ActionDescriptor();

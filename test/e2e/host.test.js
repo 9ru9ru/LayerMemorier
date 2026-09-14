@@ -53,6 +53,14 @@ test('setLayerColor changes native color reported by getLayers', () => {
   assert.equal(layers.find(l => l.name === 'G').color, 'yellowColor');
   psCall('setLayerColor', { id: byName.A0, color: 'none' });
   assert.equal(psCall('getLayers').find(l => l.name === 'A0').color, 'none');
+
+  // 숨겨진 레이어를 칠해도 가시성이 바뀌면 안 된다: setLayerColor 안의 'slct' 에
+  // MkVs=false 가 빠져 있으면 대상 레이어가 켜진다.
+  assert.equal(psCall('getLayers').find(l => l.name === 'H').visible, false, 'H starts hidden');
+  psCall('setLayerColor', { id: byName.H, color: 'blue' });
+  const h = psCall('getLayers').find(l => l.name === 'H');
+  assert.equal(h.color, 'blue');
+  assert.equal(h.visible, false, 'colouring a hidden layer must not make it visible');
 });
 
 test('docData round-trips through XMP and survives save/reopen', () => {

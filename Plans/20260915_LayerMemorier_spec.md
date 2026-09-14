@@ -200,8 +200,9 @@ PSD의 XMP 메타데이터에 저장. 네임스페이스 `http://layermemorier.l
 | `LM.getSelectedLayerIds()` | 없음 | `[id]` |
 | `LM.selectLayers(json)` | `[id]` | `{ok}` |
 | `LM.readDocData()` | 없음 | 문서 데이터 JSON 또는 `null` |
-| `LM.writeDocData(json)` | 문서 데이터 | `{ok}` |
+| `LM.writeDocData(json)` | 문서 데이터, 또는 봉투 `{doc: {name, path}, data: 문서 데이터}` | `{ok}` — 봉투면 활성 문서가 `doc`과 다를 때 오류. 저장되는 JSON은 `data` 부분뿐이라 `readDocData`는 그대로 |
 | `LM.setLayerColor(json)` | `{id, color}` | `{ok}` |
+| `LM.ensureDestination(json)` | `{path}` | `{ok}` 또는 `{error}` — 출력 폴더를 만들고 쓸 수 있는지 시작 전에 한 번 확인 (§9) |
 | `LM.exportBegin(json)` | `{layerIds: [id]}` | `{ok}` — 해당 레이어의 가시성 스냅샷 저장 |
 | `LM.exportOne(json)` | `{on: [id], off: [id], path}` | `{ok}` 또는 `{error}` — 폴더 생성, 가시성 설정, PNG 저장 |
 | `LM.exportEnd()` | 없음 | `{ok}` — 스냅샷 복원 |
