@@ -10,18 +10,17 @@
 
   try {
     await LMHost.load();
+
+    let timer = null;
+    await LMHost.onEvents(() => {
+      if (LMState.exporting) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => LMApp.refresh(), 200);
+    });
+
+    await LMApp.refresh();
+    window.LMReady = true;
   } catch (e) {
     LMApp.status(e.message);
-    return;
   }
-
-  let timer = null;
-  await LMHost.onEvents(() => {
-    if (LMState.exporting) return;
-    clearTimeout(timer);
-    timer = setTimeout(() => LMApp.refresh(), 200);
-  });
-
-  await LMApp.refresh();
-  window.LMReady = true;
 })();

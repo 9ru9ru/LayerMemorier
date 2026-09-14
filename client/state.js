@@ -78,7 +78,7 @@ const LMApp = {
     document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === LMState.tab));
     document.querySelectorAll('main .tab').forEach(s => s.classList.toggle('active', s.id === 'tab-' + LMState.tab));
     const el = document.getElementById('tab-' + LMState.tab);
-    if (!LMState.docInfo) { el.innerHTML = '<p class="hint">포토샵에서 문서를 열면 여기에 표시됩니다.</p>'; return; }
+    if (!LMState.docInfo || !LMState.docData) { el.innerHTML = '<p class="hint">포토샵에서 문서를 열면 여기에 표시됩니다.</p>'; return; }
     LMUI[LMState.tab].render(el);
   },
 };
