@@ -69,6 +69,92 @@ var LM = LM || {};
       close: cid('Cls ')
     };
   });
+
+  // ---- layers (ActionManager) ----
+
+  LM.getLayers = wrap(function () {
+    if (!hasDoc()) return [];
+    var ref = new ActionReference();
+    ref.putEnumerated(cid('Dcmn'), cid('Ordn'), cid('Trgt'));
+    var count = executeActionGet(ref).getInteger(cid('NmbL'));
+    var from = hasBackground() ? 0 : 1;
+    var out = [];
+    var stack = [];
+    for (var i = count; i >= from; i--) {
+      var r = new ActionReference();
+      r.putIndex(cid('Lyr '), i);
+      var d = executeActionGet(r);
+      var section = typeIDToStringID(d.getEnumerationValue(sid('layerSection')));
+      if (section === 'layerSectionEnd') { stack.pop(); continue; }
+      var item = {
+        id: d.getInteger(sid('layerID')),
+        name: d.getString(cid('Nm  ')),
+        kind: section === 'layerSectionStart' ? 'group' : 'layer',
+        visible: d.getBoolean(cid('Vsbl')),
+        depth: stack.length,
+        parentId: stack.length ? stack[stack.length - 1] : null,
+        color: typeIDToStringID(d.getEnumerationValue(cid('Clr ')))
+      };
+      out.push(item);
+      if (item.kind === 'group') stack.push(item.id);
+    }
+    return out;
+  });
+
+  LM.getSelectedLayerIds = wrap(function () {
+    if (!hasDoc()) return [];
+    var ref = new ActionReference();
+    ref.putProperty(cid('Prpr'), sid('targetLayers'));
+    ref.putEnumerated(cid('Dcmn'), cid('Ordn'), cid('Trgt'));
+    var desc = executeActionGet(ref);
+    if (!desc.hasKey(sid('targetLayers'))) return [];
+    var list = desc.getList(sid('targetLayers'));
+    var offset = hasBackground() ? 0 : 1;
+    var ids = [];
+    for (var i = 0; i < list.count; i++) {
+      var idx = list.getReference(i).getIndex() + offset;
+      var r = new ActionReference();
+      r.putIndex(cid('Lyr '), idx);
+      ids.push(executeActionGet(r).getInteger(sid('layerID')));
+    }
+    return ids;
+  });
+
+  LM.selectLayers = wrap(function (ids) {
+    if (!hasDoc() || !ids || !ids.length) return { ok: true };
+    for (var i = 0; i < ids.length; i++) {
+      var ref = new ActionReference();
+      ref.putIdentifier(cid('Lyr '), ids[i]);
+      var desc = new ActionDescriptor();
+      desc.putReference(cid('null'), ref);
+      if (i > 0) desc.putEnumerated(sid('selectionModifier'), sid('selectionModifierType'), sid('addToSelection'));
+      desc.putBoolean(cid('MkVs'), false);
+      executeAction(cid('slct'), desc, DialogModes.NO);
+    }
+    return { ok: true };
+  });
+
+  LM.setLayerColor = wrap(function (a) {
+    if (!hasDoc()) throw new Error('no document');
+    // The 'setd' action ignores a putIdentifier target for the 'Clr ' (layer
+    // color tag) property and always applies to the active layer instead, so
+    // the layer must be selected first and the set targeted at Ordn/Trgt.
+    var sref = new ActionReference();
+    sref.putIdentifier(cid('Lyr '), a.id);
+    var sdesc = new ActionDescriptor();
+    sdesc.putReference(cid('null'), sref);
+    executeAction(cid('slct'), sdesc, DialogModes.NO);
+
+    var ref = new ActionReference();
+    ref.putEnumerated(cid('Lyr '), cid('Ordn'), cid('Trgt'));
+    var desc = new ActionDescriptor();
+    desc.putReference(cid('null'), ref);
+    var props = new ActionDescriptor();
+    props.putEnumerated(cid('Clr '), cid('Clr '), sid(a.color));
+    desc.putObject(cid('T   '), cid('Lyr '), props);
+    executeAction(cid('setd'), desc, DialogModes.NO);
+    return { ok: true };
+  });
 })();
 
 'LM loaded';

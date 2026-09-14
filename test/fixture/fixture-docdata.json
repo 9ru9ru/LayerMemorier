@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "baseName": "fx",
+  "delimiter": "_",
+  "destination": "",
+  "nativeColor": false,
+  "categories": [
+    { "id": "cA", "name": "A", "color": "red", "labelFormat": "{c}{v}", "folder": true,
+      "values": [ { "id": "a0", "name": "0", "label": "0" }, { "id": "a1", "name": "1", "label": "1" } ] },
+    { "id": "cB", "name": "B", "color": "blue", "labelFormat": "{v}", "folder": false,
+      "values": [ { "id": "b0", "name": "0", "label": "0" }, { "id": "b1", "name": "1", "label": "1" }, { "id": "b2", "name": "2", "label": "2" } ] },
+    { "id": "cN", "name": "N", "color": "green", "labelFormat": "{v}", "folder": false,
+      "values": [ { "id": "n1", "name": "1", "label": "1" }, { "id": "n2", "name": "2", "label": "2" } ] }
+  ],
+  "marksByName": {
+    "A0": { "cA": ["a0"] },
+    "A1": { "cA": ["a1"] },
+    "B0": { "cB": ["b0"] },
+    "B1": { "cB": ["b1"] },
+    "B2": { "cB": ["b2"] },
+    "N1": { "cN": ["n1"] },
+    "N2": { "cN": ["n2"] },
+    "G":  { "cA": ["a1"] },
+    "GA": { "cB": ["b0"] }
+  },
+  "excluded": []
+}
