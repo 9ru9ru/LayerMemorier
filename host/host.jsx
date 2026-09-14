@@ -188,6 +188,111 @@ var LM = LM || {};
     app.activeDocument.xmpMetadata.rawData = xmp.serialize();
     return { ok: true };
   });
+
+  // ---- export ----
+
+  var snapshot = null;
+  var currentJob = null;
+
+  function visibilityOf(id) {
+    var r = new ActionReference();
+    r.putIdentifier(cid('Lyr '), id);
+    return executeActionGet(r).getBoolean(cid('Vsbl'));
+  }
+
+  function setVisibleMany(ids, on) {
+    if (!ids || !ids.length) return;
+    var list = new ActionList();
+    for (var i = 0; i < ids.length; i++) {
+      var r = new ActionReference();
+      r.putIdentifier(cid('Lyr '), ids[i]);
+      list.putReference(r);
+    }
+    var desc = new ActionDescriptor();
+    desc.putList(cid('null'), list);
+    executeAction(cid(on ? 'Shw ' : 'Hd  '), desc, DialogModes.NO);
+  }
+
+  function ensureFolder(folder) {
+    if (!folder || folder.exists) return;
+    ensureFolder(folder.parent);
+    if (!folder.create()) throw new Error('cannot create folder: ' + folder.fsName);
+  }
+
+  function saveForWebPng24(file) {
+    var desc = new ActionDescriptor();
+    var d2 = new ActionDescriptor();
+    d2.putEnumerated(cid('Op  '), cid('SWOp'), cid('OpSa'));
+    d2.putEnumerated(cid('Fmt '), cid('IRFm'), cid('PN24'));
+    d2.putBoolean(cid('Intr'), false);
+    d2.putBoolean(cid('Trns'), true);
+    d2.putBoolean(cid('Mtt '), true);
+    d2.putInteger(cid('MttR'), 255);
+    d2.putInteger(cid('MttG'), 255);
+    d2.putInteger(cid('MttB'), 255);
+    d2.putBoolean(cid('SHTM'), false);
+    d2.putBoolean(cid('SImg'), true);
+    d2.putBoolean(cid('SSSO'), false);
+    d2.putList(cid('SSLt'), new ActionList());
+    d2.putBoolean(cid('DIDr'), false);
+    d2.putPath(cid('In  '), file);
+    desc.putObject(cid('Usng'), sid('SaveForWeb'), d2);
+    executeAction(cid('Expr'), desc, DialogModes.NO);
+  }
+
+  function savePng(target) {
+    var doc = app.activeDocument;
+    if (doc.width.as('px') > 8192 || doc.height.as('px') > 8192) {
+      var opts = new PNGSaveOptions();
+      opts.compression = 6;
+      opts.interlaced = false;
+      doc.saveAs(target, opts, true, Extension.LOWERCASE);
+      return;
+    }
+    if (target.exists) target.remove();
+    saveForWebPng24(target);
+  }
+
+  LM._runJob = function () {
+    var job = currentJob;
+    setVisibleMany(job.on, true);
+    setVisibleMany(job.off, false);
+    var target = new File(job.path);
+    ensureFolder(target.parent);
+    savePng(target);
+  };
+
+  LM.exportBegin = wrap(function (a) {
+    if (!hasDoc()) throw new Error('no document');
+    snapshot = [];
+    for (var i = 0; i < a.layerIds.length; i++) {
+      snapshot.push({ id: a.layerIds[i], visible: visibilityOf(a.layerIds[i]) });
+    }
+    return { ok: true };
+  });
+
+  LM.exportOne = wrap(function (job) {
+    if (!hasDoc()) throw new Error('no document');
+    currentJob = job;
+    try {
+      app.activeDocument.suspendHistory('LayerMemorier export', 'LM._runJob()');
+    } finally {
+      currentJob = null;
+    }
+    return { ok: true };
+  });
+
+  LM.exportEnd = wrap(function () {
+    if (!snapshot) return { ok: true };
+    var on = [], off = [];
+    for (var i = 0; i < snapshot.length; i++) {
+      (snapshot[i].visible ? on : off).push(snapshot[i].id);
+    }
+    setVisibleMany(on, true);
+    setVisibleMany(off, false);
+    snapshot = null;
+    return { ok: true };
+  });
 })();
 
 'LM loaded';
