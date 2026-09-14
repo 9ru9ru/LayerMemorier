@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { psRun, psCall } = require('../helpers/ps');
-const { buildFixture } = require('../helpers/fixture');
+const { buildFixture, reopenFixture, docDataFor } = require('../helpers/fixture');
 
 test('host loads and ping answers', () => {
   assert.equal(psRun('"ok"', { host: false }), 'ok');
@@ -53,4 +53,23 @@ test('setLayerColor changes native color reported by getLayers', () => {
   assert.equal(layers.find(l => l.name === 'G').color, 'yellowColor');
   psCall('setLayerColor', { id: byName.A0, color: 'none' });
   assert.equal(psCall('getLayers').find(l => l.name === 'A0').color, 'none');
+});
+
+test('docData round-trips through XMP and survives save/reopen', () => {
+  const { byName } = buildFixture();
+  assert.equal(psCall('readDocData'), null);
+  const data = docDataFor(byName, 'D:/tmp/lm');
+  psCall('writeDocData', data);
+  assert.deepEqual(psCall('readDocData'), data);
+  psRun('app.activeDocument.save(); "saved"');
+  const reopened = reopenFixture();
+  assert.deepEqual(reopened.byName, byName, 'layer ids must survive save/reopen');
+  assert.deepEqual(psCall('readDocData'), data);
+});
+
+test('writeDocData keeps unicode intact', () => {
+  buildFixture();
+  const data = { version: 1, baseName: '알싸기 テスト', delimiter: '_', destination: 'D:/출력', nativeColor: true, categories: [], marks: {}, excluded: [] };
+  psCall('writeDocData', data);
+  assert.deepEqual(psCall('readDocData'), data);
 });

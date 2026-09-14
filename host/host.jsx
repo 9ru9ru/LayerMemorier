@@ -155,6 +155,39 @@ var LM = LM || {};
     executeAction(cid('setd'), desc, DialogModes.NO);
     return { ok: true };
   });
+
+  // ---- document data in XMP ----
+
+  var NS = 'http://layermemorier.local/1.0/';
+
+  function xmpLib() {
+    if (ExternalObject.AdobeXMPScript === undefined) {
+      ExternalObject.AdobeXMPScript = new ExternalObject('lib:AdobeXMPScript');
+    }
+    XMPMeta.registerNamespace(NS, 'lm');
+  }
+
+  function readXmp() {
+    var raw = app.activeDocument.xmpMetadata.rawData;
+    return (raw && raw.length) ? new XMPMeta(raw) : new XMPMeta();
+  }
+
+  LM.readDocData = wrap(function () {
+    if (!hasDoc()) return null;
+    xmpLib();
+    var prop = readXmp().getProperty(NS, 'data');
+    if (!prop || !prop.value) return null;
+    return String(prop.value);
+  });
+
+  LM.writeDocData = wrap(function (data) {
+    if (!hasDoc()) throw new Error('no document');
+    xmpLib();
+    var xmp = readXmp();
+    xmp.setProperty(NS, 'data', JSON.stringify(data));
+    app.activeDocument.xmpMetadata.rawData = xmp.serialize();
+    return { ok: true };
+  });
 })();
 
 'LM loaded';
