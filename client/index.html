@@ -3,19 +3,36 @@
 <head>
 <meta charset="utf-8">
 <title>LayerMemorier</title>
-<style>
-  body { margin: 0; padding: 12px; font: 13px sans-serif; background: #323232; color: #ddd; }
-</style>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-<h1 id="title" style="font-size:16px">LayerMemorier</h1>
-<div id="info">loading…</div>
+<header id="top">
+  <span id="doc-name">문서 없음</span>
+  <button id="btn-refresh" title="레이어와 문서 데이터를 다시 읽습니다">새로고침</button>
+</header>
+<nav id="tabs">
+  <button data-tab="categories" class="active">카테고리</button>
+  <button data-tab="layers">레이어</button>
+  <button data-tab="export">내보내기</button>
+</nav>
+<main>
+  <section id="tab-categories" class="tab active"></section>
+  <section id="tab-layers" class="tab"></section>
+  <section id="tab-export" class="tab"></section>
+</main>
+<footer id="status"></footer>
 <script src="lib/CSInterface.js"></script>
-<script>
-  var cs = new CSInterface();
-  cs.evalScript('app.version + " docs=" + app.documents.length', function (r) {
-    document.getElementById('info').textContent = 'Photoshop ' + r;
-  });
-</script>
+<script src="../core/variation.js"></script>
+<script src="../core/visibility.js"></script>
+<script src="../core/naming.js"></script>
+<script src="../core/jobs.js"></script>
+<script src="colors.js"></script>
+<script src="host-bridge.js"></script>
+<script src="presets.js"></script>
+<script src="state.js"></script>
+<script src="ui/categories.js"></script>
+<script src="ui/layers.js"></script>
+<script src="ui/export.js"></script>
+<script src="main.js"></script>
 </body>
 </html>
