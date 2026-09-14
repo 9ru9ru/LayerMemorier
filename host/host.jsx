@@ -247,10 +247,12 @@ var LM = LM || {};
       opts.compression = 6;
       opts.interlaced = false;
       doc.saveAs(target, opts, true, Extension.LOWERCASE);
+      if (!target.exists) throw new Error('save failed, file not found: ' + target.fsName);
       return;
     }
     if (target.exists) target.remove();
     saveForWebPng24(target);
+    if (!target.exists) throw new Error('save failed, file not found: ' + target.fsName);
   }
 
   LM._runJob = function () {

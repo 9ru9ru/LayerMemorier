@@ -125,8 +125,10 @@ LMUI.layers = (() => {
     if (btn.dataset.action === 'marks-clear') {
       const ids = LMState.selectedIds.slice();
       for (const id of ids) delete LMState.docData.marks[String(id)];
-      await LMApp.saveDocData();
-      await applyNativeColor(ids);
+      try {
+        await LMApp.saveDocData();
+        await applyNativeColor(ids);
+      } catch (err) { LMApp.status(err.message); }
       return LMApp.render();
     }
     if (btn.dataset.action === 'orphans-clean') {
