@@ -4,8 +4,8 @@
   "private": true,
   "description": "Photoshop 2020 CEP panel: remember layer variations and export all combinations",
   "scripts": {
-    "test": "node --test test/unit/",
-    "test:e2e": "node --test test/e2e/",
+    "test": "node --test \"test/unit/**/*.test.js\"",
+    "test:e2e": "node --test \"test/e2e/**/*.test.js\"",
     "panel:shot": "node tools/panel.js shot",
     "panel:eval": "node tools/panel.js eval"
   },
