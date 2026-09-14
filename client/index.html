@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>LayerMemorier</title>
+<style>
+  body { margin: 0; padding: 12px; font: 13px sans-serif; background: #323232; color: #ddd; }
+</style>
+</head>
+<body>
+<h1 id="title" style="font-size:16px">LayerMemorier</h1>
+<div id="info">loading…</div>
+<script src="lib/CSInterface.js"></script>
+<script>
+  var cs = new CSInterface();
+  cs.evalScript('app.version + " docs=" + app.documents.length', function (r) {
+    document.getElementById('info').textContent = 'Photoshop ' + r;
+  });
+</script>
+</body>
+</html>

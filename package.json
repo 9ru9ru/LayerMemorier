@@ -1,0 +1,16 @@
+{
+  "name": "layermemorier",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Photoshop 2020 CEP panel: remember layer variations and export all combinations",
+  "scripts": {
+    "test": "node --test test/unit/",
+    "test:e2e": "node --test test/e2e/",
+    "panel:shot": "node tools/panel.js shot",
+    "panel:eval": "node tools/panel.js eval"
+  },
+  "devDependencies": {
+    "chrome-remote-interface": "0.34.0",
+    "pngjs": "7.0.0"
+  }
+}
