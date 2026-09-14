@@ -109,3 +109,56 @@ test('layer tab: badges, selection sync, marking writes XMP and native color', a
     p.close();
   }
 });
+
+test('export tab: preview, exclusion, partial include, run with progress and summary', async () => {
+  const DEST = path.join(__dirname, '..', 'out', 'panel-export');
+  fs.rmSync(DEST, { recursive: true, force: true });
+  const { byName } = buildFixture();
+  psCall('writeDocData', docDataFor(byName, DEST.replace(/\\/g, '/')));
+  const p = await freshPanel();
+  try {
+    await p.eval(`document.querySelector('#tabs [data-tab=export]').click(); true`);
+    assert.equal(await p.eval(`document.querySelector('#tab-export .count').textContent`), '12');
+    assert.equal(await p.eval(`document.querySelector('#tab-export [data-field=baseName]').value`), 'fx');
+
+    // 제외 조합 추가: A=1, B=2 → 12 - 2 = 10
+    await p.eval(`document.querySelector('#tab-export .exclude-new [data-category=cA]').value = 'a1';
+                  document.querySelector('#tab-export .exclude-new [data-category=cB]').value = 'b2';
+                  document.querySelector('[data-action=exclude-add]').click(); true`);
+    await new Promise(r => setTimeout(r, 500));
+    assert.equal(await p.eval(`document.querySelector('#tab-export .count').textContent`), '10');
+    assert.deepEqual(psCall('readDocData').excluded, [{ cA: 'a1', cB: 'b2' }]);
+
+    // 부분 출력: N=2 만 → 5
+    await p.eval(`document.querySelector('#tab-export .include input[data-category=cN][data-value=n1]').click(); true`);
+    assert.equal(await p.eval(`document.querySelector('#tab-export .count').textContent`), '5');
+
+    // 실행
+    await p.eval('LMUI.export.run()');
+    const summary = await p.eval('LMState.summary');
+    assert.equal(summary.done, 5);
+    assert.deepEqual(summary.failures, []);
+    const files = [];
+    for (const dir of fs.readdirSync(DEST)) for (const f of fs.readdirSync(path.join(DEST, dir))) files.push(dir + '/' + f);
+    assert.deepEqual(files.sort(), ['fx_A0/fx_A0_0_2.png', 'fx_A0/fx_A0_1_2.png', 'fx_A0/fx_A0_2_2.png', 'fx_A1/fx_A1_0_2.png', 'fx_A1/fx_A1_1_2.png']);
+    assert.match(await p.eval(`document.querySelector('#tab-export .summary').textContent`), /5개 성공/);
+    await p.shot('panel-export');
+  } finally {
+    p.close();
+  }
+});
+
+test('export tab blocks on name conflicts', async () => {
+  const { byName } = buildFixture();
+  const data = docDataFor(byName);
+  data.categories[1].values[1].label = '0'; // B1 라벨을 B0와 같게
+  psCall('writeDocData', data);
+  const p = await freshPanel();
+  try {
+    await p.eval(`document.querySelector('#tabs [data-tab=export]').click(); true`);
+    assert.equal(await p.eval(`document.querySelector('[data-action=export-run]').disabled`), true);
+    assert.match(await p.eval(`document.querySelector('#tab-export .conflicts').textContent`), /충돌/);
+  } finally {
+    p.close();
+  }
+});
