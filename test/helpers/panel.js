@@ -7,20 +7,43 @@ const ROOT = path.resolve(__dirname, '..', '..');
 const SHOTS = path.join(ROOT, 'test', 'out', 'shots');
 
 async function connect(port = 8092) {
-  const targets = await CDP.List({ port });
+  let targets;
+  try {
+    targets = await CDP.List({ port });
+  } catch (e) {
+    throw new Error('panel not reachable on port ' + port + ' (is Photoshop open with the panel loaded?): ' + e.message);
+  }
   const target = targets.find(t => /index\.html/.test(t.url)) || targets[0];
   if (!target) throw new Error('panel target not found on port ' + port + ' (is the panel open in Photoshop?)');
   const client = await CDP({ port, target });
-  await client.Page.enable();
-  await client.Runtime.enable();
+  try {
+    await client.Page.enable();
+    await client.Runtime.enable();
+  } catch (e) {
+    await client.close();
+    throw e;
+  }
   return {
-    async eval(expression) {
-      const r = await client.Runtime.evaluate({ expression, returnByValue: true, awaitPromise: true });
-      if (r.exceptionDetails) {
-        const ex = r.exceptionDetails.exception;
-        throw new Error('panel eval failed: ' + (ex && ex.description ? ex.description : r.exceptionDetails.text));
+    async eval(expression, timeoutMs = 20000) {
+      let timer;
+      const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error('panel eval timed out after ' + timeoutMs + 'ms: ' + expression.slice(0, 100)));
+        }, timeoutMs);
+      });
+      try {
+        const r = await Promise.race([
+          client.Runtime.evaluate({ expression, returnByValue: true, awaitPromise: true }),
+          timeout,
+        ]);
+        if (r.exceptionDetails) {
+          const ex = r.exceptionDetails.exception;
+          throw new Error('panel eval failed: ' + (ex && ex.description ? ex.description : r.exceptionDetails.text));
+        }
+        return r.result.value;
+      } finally {
+        clearTimeout(timer);
       }
-      return r.result.value;
     },
     async shot(label) {
       fs.mkdirSync(SHOTS, { recursive: true });
