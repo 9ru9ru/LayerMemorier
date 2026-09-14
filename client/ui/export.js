@@ -89,6 +89,14 @@ LMUI.export = (() => {
     const d = LMState.docData;
     const pv = preview();
     if (pv.conflicts.length || !pv.jobs.length) return;
+    const dest = d.destination.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+    // spec §9: 출력 폴더는 시작 전에 한 번 만들어 보고 쓸 수 있는지 확인한다.
+    // 여기서 걸러야 잘못된 경로가 배리에이션 수만큼 같은 오류를 내지 않는다.
+    try {
+      await LMHost.call('ensureDestination', { path: dest });
+    } catch (e) {
+      return LMApp.status('출력 폴더를 쓸 수 없습니다: ' + e.message);
+    }
     LMState.exporting = true; LMState.abort = false; LMState.summary = null;
     LMState.progress = { done: 0, total: pv.jobs.length, current: '' };
     const failures = [];
@@ -98,7 +106,6 @@ LMUI.export = (() => {
     try {
       await LMApp.saveDocData();
       await LMHost.call('exportBegin', { layerIds: LMCore.jobs.markedLayerIds(d.marks, LMState.layers) });
-      const dest = d.destination.trim().replace(/\\/g, '/').replace(/\/+$/, '');
       for (const job of pv.jobs) {
         if (LMState.abort) break;
         LMState.progress.current = job.relativePath;

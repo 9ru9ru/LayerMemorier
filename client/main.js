@@ -15,7 +15,11 @@
     await LMHost.onEvents(() => {
       if (LMState.exporting) return;
       clearTimeout(timer);
-      timer = setTimeout(() => LMApp.refresh(), 200);
+      timer = setTimeout(() => {
+        // 패널이 스스로 일으킨 선택 변경의 메아리는 무시한다 (레이어 탭이 표시).
+        if (Date.now() < LMState.echoUntil) return;
+        LMApp.refresh().catch(err => LMApp.status(err.message));
+      }, 200);
     });
 
     await LMApp.refresh();

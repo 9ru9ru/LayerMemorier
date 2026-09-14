@@ -56,7 +56,12 @@ LMUI.categories = (() => {
       `<div class="row"><button data-action="cat-add">카테고리 추가</button></div>`;
   }
 
-  function commit() { LMApp.saveDocData(); LMApp.render(); }
+  // 저장이 끝난 뒤에 다시 그린다. 저장을 기다리지 않고 그리면 blur→change 로
+  // 들어온 경우 mousedown 과 mouseup 사이에서 innerHTML 이 갈려 그 클릭이 사라진다.
+  async function commit() {
+    await LMApp.saveDocData();
+    return LMApp.render();
+  }
 
   function findCategory(target) {
     const block = target.closest('[data-category]');
@@ -64,9 +69,15 @@ LMUI.categories = (() => {
     return LMState.docData.categories.find(c => c.id === block.dataset.category) || null;
   }
 
-  document.addEventListener('click', async e => {
+  // 리스너는 동기로 두고 비동기 본문을 따로 부른다. commit()이 async 라서
+  // 어느 경로에서든 거부가 처리되지 않은 채 새지 않게 여기서 한 번에 받는다 (컨벤션 #2).
+  document.addEventListener('click', e => {
     const btn = e.target.closest('#tab-categories [data-action]');
     if (!btn) return;
+    onClick(btn).catch(err => LMApp.status(err.message));
+  });
+
+  async function onClick(btn) {
     const cats = LMState.docData.categories;
     const c = findCategory(btn);
     const idx = c ? cats.indexOf(c) : -1;
@@ -79,8 +90,8 @@ LMUI.categories = (() => {
         LMState.docData.excluded = LMState.docData.excluded.map(x => { const y = Object.assign({}, x); delete y[c.id]; return y; }).filter(x => Object.keys(x).length);
         return commit();
       }
-      case 'cat-up': if (idx > 0) { cats.splice(idx - 1, 0, cats.splice(idx, 1)[0]); commit(); } return;
-      case 'cat-down': if (idx < cats.length - 1) { cats.splice(idx + 1, 0, cats.splice(idx, 1)[0]); commit(); } return;
+      case 'cat-up': if (idx > 0) { cats.splice(idx - 1, 0, cats.splice(idx, 1)[0]); return commit(); } return;
+      case 'cat-down': if (idx < cats.length - 1) { cats.splice(idx + 1, 0, cats.splice(idx, 1)[0]); return commit(); } return;
       case 'value-add': c.values.push(LMApp.newValue(String(c.values.length))); return commit();
       case 'value-range': {
         const block = btn.closest('[data-category]');
@@ -93,9 +104,14 @@ LMUI.categories = (() => {
       case 'value-delete': {
         const row = btn.closest('[data-value]');
         const v = c.values.find(v => v.id === row.dataset.value);
+        // 마킹은 되돌릴 수 없고(spec §1) 이 버튼은 편집 중인 입력칸 바로 옆에 있다.
+        // 지워질 마크가 있으면 먼저 묻고, 끝난 뒤 몇 개가 바뀌었는지 알린다.
+        const affected = LMApp.countMarksFor(c.id, v.id);
+        if (affected && !confirm(`값 "${v.name}"을 지웁니다. 레이어 ${affected}개의 마크가 바뀝니다. 계속할까요?`)) return;
         LMApp.removeMarksFor(c.id, v.id);
         c.values.splice(c.values.indexOf(v), 1);
         LMState.docData.excluded = LMState.docData.excluded.filter(x => x[c.id] !== v.id);
+        LMApp.status(affected ? `값 "${v.name}" 삭제 — 레이어 ${affected}개의 마크가 바뀌었습니다.` : `값 "${v.name}" 삭제`);
         return commit();
       }
       case 'preset-apply': {
@@ -126,11 +142,15 @@ LMUI.categories = (() => {
         return LMApp.render();
       }
     }
-  });
+  }
 
   document.addEventListener('change', e => {
     const input = e.target.closest('#tab-categories [data-field]');
     if (!input) return;
+    onChange(input).catch(err => LMApp.status(err.message));
+  });
+
+  async function onChange(input) {
     const c = findCategory(input);
     const row = input.closest('[data-value]');
     const target = row ? c.values.find(v => v.id === row.dataset.value) : c;
@@ -145,8 +165,8 @@ LMUI.categories = (() => {
     } else {
       target[field] = input.value;
     }
-    commit();
-  });
+    return commit();
+  }
 
   return { render, reloadPresets: () => { presets = null; } };
 })();

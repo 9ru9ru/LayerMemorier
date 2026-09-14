@@ -62,6 +62,11 @@ LMUI.layers = (() => {
     el.querySelectorAll('input[data-mixed]').forEach(i => { i.indeterminate = true; });
   }
 
+  // 패널이 포토샵 선택을 바꾸면 slct 이벤트가 그대로 되돌아온다. 그 메아리로
+  // 레이어 목록을 통째로 다시 읽으면 방금 클릭한 자리에서 스크롤이 튄다.
+  // 300ms 동안은 main.js의 디바운스가 새로고침을 건너뛴다.
+  function muteEcho() { LMState.echoUntil = Date.now() + 300; }
+
   // setLayerColor는 'Clr ' 속성을 항상 활성 레이어에 적용하므로 대상 레이어를 먼저
   // 선택하는 부작용이 있다(env-facts.md). 루프를 도는 동안 포토샵의 선택이
   // 마지막으로 칠한 레이어 하나로 좁혀지므로, 루프 앞뒤로 패널이 알던 선택을
@@ -75,11 +80,14 @@ LMUI.layers = (() => {
       const first = mark && Object.keys(mark)[0];
       const c = first && LMState.docData.categories.find(c => c.id === first);
       const color = c ? LMColors.native(c.color) : 'none';
+      muteEcho();
       try { await LMHost.call('setLayerColor', { id, color }); } catch (e) { LMApp.status(e.message); }
     }
     if (saved && saved.length) {
+      muteEcho();
       try { await LMHost.call('selectLayers', saved); } catch (e) { LMApp.status(e.message); }
     }
+    muteEcho();
     const layers = await LMHost.call('getLayers');
     LMState.layers = layers;
   }
@@ -117,7 +125,9 @@ LMUI.layers = (() => {
         LMState.selectedIds = [id];
       }
       LMApp.render();
+      muteEcho();
       try { await LMHost.call('selectLayers', LMState.selectedIds); } catch (err) { LMApp.status(err.message); }
+      muteEcho();
       return;
     }
     const btn = e.target.closest('#tab-layers [data-action]');
@@ -141,7 +151,10 @@ LMUI.layers = (() => {
   document.addEventListener('change', e => {
     const box = e.target.closest('#tab-layers .mark-panel input[data-category]');
     if (!box) return;
-    setMark(LMState.selectedIds.slice(), box.dataset.category, box.dataset.value, box.checked).catch(e => LMApp.status(e.message));
+    // markPanel과 같은 기준으로 거른다. 낡은 선택 id가 남아 있으면 문서에 없는
+    // 레이어의 마크(고아 마크)를 새로 만들게 된다.
+    const ids = LMState.selectedIds.filter(id => LMState.layers.some(l => l.id === id));
+    setMark(ids, box.dataset.category, box.dataset.value, box.checked).catch(e => LMApp.status(e.message));
   });
 
   return { render, setMark };
