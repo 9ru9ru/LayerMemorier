@@ -1,6 +1,11 @@
 // 카테고리 탭 (spec §6.1). 그리기 + 이벤트 처리만 한다.
 LMUI.categories = (() => {
-  const FORMATS = ['{v}', '{c}{v}', '{c}_{v}'];
+  // 저장되는 값은 그대로 두고 보이는 글자만 말로 바꾼다 (기존 문서 호환).
+  const FORMATS = [
+    { value: '{v}', text: '값만' },
+    { value: '{c}{v}', text: '이름+값' },
+    { value: '{c}_{v}', text: '이름_값' },
+  ];
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   let presets = null;
 
@@ -17,23 +22,38 @@ LMUI.categories = (() => {
       ${presets.corrupt ? '<p class="warn">presets.json이 깨져 있어 비웠습니다 (원본은 presets.json.bak).</p>' : ''}`;
   }
 
+  // 두 칸이 똑같이 생겨서 무엇이 무엇인지 알 수 없다. 제목 줄을 붙인다.
   function valueRows(c) {
-    return c.values.map(v => `
+    const head = c.values.length ? `
+      <div class="row value-head">
+        <span class="v-col">값 이름</span>
+        <span class="v-col">파일명에 쓸 글자 <span class="hint">(비우면 빠짐)</span></span>
+        <span class="v-del"></span>
+      </div>` : '';
+    return head + c.values.map(v => `
       <div class="row value-row" data-value="${esc(v.id)}">
         <input class="v-name" data-field="name" value="${esc(v.name)}" placeholder="값 이름">
-        <input class="v-label" data-field="label" value="${esc(v.label)}" placeholder="파일명 라벨 (비우면 생략)">
+        <input class="v-label" data-field="label" value="${esc(v.label)}" placeholder="비우면 파일명에서 빠짐">
         <button data-action="value-delete" title="값 삭제">×</button>
       </div>`).join('');
   }
 
+  // 이름·라벨·형식이 파일명에서 어떻게 보이는지 그 자리에서 보여준다.
+  function exampleLine(c) {
+    if (!c.values.length) return '';
+    const shown = c.values.slice(0, 4).map(v => LMCore.naming.token(c, v) || '(생략)');
+    const more = c.values.length > 4 ? ', …' : '';
+    return `<div class="example">→ 파일명에 이렇게 들어갑니다: <code>${esc(shown.join(', ') + more)}</code></div>`;
+  }
+
   function categoryBlock(c, i, n) {
-    const formats = FORMATS.map(f => `<option value="${esc(f)}" ${c.labelFormat === f ? 'selected' : ''}>${esc(f)}</option>`).join('');
+    const formats = FORMATS.map(f => `<option value="${esc(f.value)}" ${c.labelFormat === f.value ? 'selected' : ''}>${esc(f.text)}</option>`).join('');
     return `
       <div class="category" data-category="${esc(c.id)}">
         <div class="row cat-head">
           <span class="dot" style="background:${LMColors.hex(c.color)}"></span>
           <input class="c-name" data-field="name" value="${esc(c.name)}" placeholder="카테고리 이름">
-          <select data-field="labelFormat" title="라벨 형식">${formats}</select>
+          <select data-field="labelFormat" title="값이 파일명에 어떤 모양으로 들어갈지">${formats}</select>
           <label title="이 단계에서 폴더로 묶기"><input type="checkbox" data-field="folder" ${c.folder ? 'checked' : ''}> 폴더</label>
           <button data-action="cat-up" ${i === 0 ? 'disabled' : ''}>▲</button>
           <button data-action="cat-down" ${i === n - 1 ? 'disabled' : ''}>▼</button>
@@ -46,6 +66,7 @@ LMUI.categories = (() => {
             <span class="range">범위 <input class="range-from" type="number" value="1" style="width:4em"> ~ <input class="range-to" type="number" value="5" style="width:4em">
             <button data-action="value-range">범위로 값 만들기</button></span>
           </div>
+          ${exampleLine(c)}
         </div>
       </div>`;
   }

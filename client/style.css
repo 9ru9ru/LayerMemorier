@@ -25,6 +25,11 @@ input[type=checkbox] { width: auto; }
 .cat-head .c-name { flex: 1; min-width: 80px; }
 .values { padding-left: 18px; }
 .value-row input { flex: 1; min-width: 60px; }
+.value-head { color: #999; font-size: 11px; margin: 6px 0 1px; }
+.value-head .v-col { flex: 1; min-width: 60px; padding-left: 5px; }
+.value-head .v-del { flex: 0 0 24px; }
+.example { color: #8fbf8f; font-size: 11px; margin: 6px 0 2px; }
+.example code { color: #cfe8cf; font-family: Consolas, monospace; }
 /* 레이어 탭 */
 .layer-row { display: flex; align-items: center; gap: 6px; padding: 2px 4px; border-radius: 3px; cursor: pointer; white-space: nowrap; }
 .layer-row:hover { background: #3a3a3a; }
