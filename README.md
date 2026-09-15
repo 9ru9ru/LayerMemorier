@@ -4,9 +4,9 @@
 
 ## 설치 (Windows)
 
-1. **파일 받기.** GitHub의 LayerMemorier 저장소 페이지에서 초록색 **Code** 버튼 ▸ **Download ZIP**.
-   받은 zip을 오른쪽 클릭 ▸ **압축 풀기**.
-2. **폴더 두기.** 압축을 풀면 `LayerMemorier-main` 같은 이름의 폴더가 나온다. 이 폴더를 앞으로
+1. **파일 받기.** `LayerMemorier.zip`을 받았다면 오른쪽 클릭 ▸ **압축 풀기**를 하고 2번으로 간다.
+   저장소에 접근할 수 있다면 GitHub 페이지에서 초록색 **Code** 버튼 ▸ **Download ZIP**을 써도 된다.
+2. **폴더 두기.** 압축을 풀면 `LayerMemorier` 또는 `LayerMemorier-main` 같은 이름의 폴더가 나온다. 이 폴더를 앞으로
    지우지 않을 자리에 둔다 (예: `D:\Tools\LayerMemorier`). **설치한 뒤에 이 폴더를 옮기거나 지우면
    패널이 안 뜬다.** 폴더 안에 `CSXS`, `client`, `install` 폴더가 보이면 제대로 된 위치다.
 3. **설치 실행.** 그 폴더 안의 `install` 폴더를 열고, `install.ps1` 파일을 **오른쪽 클릭 ▸

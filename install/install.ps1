@@ -1,4 +1,4 @@
-# LayerMemorier 설치: PlayerDebugMode 레지스트리 + 확장 폴더 정션. 다시 실행해도 안전하다.
+﻿# LayerMemorier 설치: PlayerDebugMode 레지스트리 + 확장 폴더 정션. 다시 실행해도 안전하다.
 $ErrorActionPreference = 'Stop'
 $extRoot = Join-Path $env:APPDATA 'Adobe\CEP\extensions'
 $link = Join-Path $extRoot 'LayerMemorier'
