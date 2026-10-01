@@ -972,3 +972,36 @@ test('export tab: run-only values, always-excluded combos and warnings are colla
     p.close();
   }
 });
+
+// 포토샵에서 지정한 레이어 색을 트리의 눈 칸 배경으로 보인다 (읽기만, 색은 바꾸지 않는다).
+function setLayerColorInPhotoshop(id, color) {
+  psRun(`var r = new ActionReference(); r.putIdentifier(charIDToTypeID('Lyr '), ${id});
+    var d = new ActionDescriptor(); d.putReference(charIDToTypeID('null'), r); d.putBoolean(charIDToTypeID('MkVs'), false);
+    executeAction(charIDToTypeID('slct'), d, DialogModes.NO);
+    var r2 = new ActionReference(); r2.putEnumerated(charIDToTypeID('Lyr '), charIDToTypeID('Ordn'), charIDToTypeID('Trgt'));
+    var d2 = new ActionDescriptor(); d2.putReference(charIDToTypeID('null'), r2);
+    var p = new ActionDescriptor(); p.putEnumerated(charIDToTypeID('Clr '), charIDToTypeID('Clr '), stringIDToTypeID('${color}'));
+    d2.putObject(charIDToTypeID('T   '), charIDToTypeID('Lyr '), p);
+    executeAction(charIDToTypeID('setd'), d2, DialogModes.NO); "ok"`);
+}
+
+test('layer tab shows Photoshop layer colors behind the eye and follows color changes', async () => {
+  const { byName } = buildFixture();
+  psCall('writeDocData', docDataFor(byName));
+  setLayerColorInPhotoshop(byName.B1, 'blue');
+  const p = await freshPanel();
+  try {
+    await p.eval(`document.querySelector('#tabs [data-tab=layers]').click(); true`);
+    const eyeBg = id => p.eval(`getComputedStyle(document.querySelector('#tab-layers [data-layer="${id}"] .eye')).backgroundColor`);
+    const none = await eyeBg(byName.A0);
+    assert.notEqual(await eyeBg(byName.B1), none, 'a colored layer has a background behind the eye');
+    setLayerColorInPhotoshop(byName.A0, 'violet');
+    await new Promise(r => setTimeout(r, 1200));
+    assert.equal(await p.eval(`LMState.layers.find(l => l.id === ${byName.A0}).color`), 'violet', 'refreshed on the color change');
+    assert.notEqual(await eyeBg(byName.A0), none);
+    assert.notEqual(await eyeBg(byName.A0), await eyeBg(byName.B1), 'different colors look different');
+    await p.shot('layers-colors');
+  } finally {
+    p.close();
+  }
+});

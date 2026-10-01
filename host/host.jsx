@@ -66,7 +66,8 @@ var LM = LM || {};
       hide: cid('Hd  '),
       move: cid('move'),
       docActivate: sid('documentAfterActivate'),
-      close: cid('Cls ')
+      close: cid('Cls '),
+      set: cid('setd')
     };
   });
 

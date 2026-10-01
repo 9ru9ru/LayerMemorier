@@ -71,7 +71,7 @@ LMUI.layers = (() => {
     const names = namesByLayer.get(l.id);
     const list = names ? `<span class="combos" title="${esc(names.join(', '))}">${esc(names.join(', '))}</span>` : '';
     return `<div class="layer-row ${l.kind}${selected}" data-layer="${l.id}" style="padding-left:${4 + l.depth * 14}px">
-      ${caret}${cats.length ? checkbox(l, cats) : ''}<span class="eye${l.visible ? ' on' : ''}">${l.visible ? '👁' : '·'}</span>
+      ${caret}${cats.length ? checkbox(l, cats) : ''}<span class="eye${l.visible ? ' on' : ''}"${LMColors.layerHex(l.color) ? ` style="background:${LMColors.layerHex(l.color)}" title="포토샵 레이어 색"` : ''}>${l.visible ? '👁' : '·'}</span>
       <span class="name">${esc(l.name)}</span>${list}</div>`;
   }
 

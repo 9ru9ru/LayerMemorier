@@ -10,8 +10,19 @@ const LMColors = (() => {
     gray: '#9ca3af',
   };
   const ORDER = ['red', 'orange', 'yellow', 'green', 'blue', 'violet', 'gray'];
+  // 포토샵 레이어 색 enum(getLayers().color) → 트리 눈 칸 배경. none 이면 null.
+  const LAYER = {
+    red: '#b34a4a',
+    orange: '#c27a3a',
+    yellowColor: '#b5a23c',
+    grain: '#5d9152',
+    blue: '#4f78b5',
+    violet: '#8763b3',
+    gray: '#7a7a7a',
+  };
   return {
     ORDER,
     hex: name => TABLE[name] || TABLE.gray,
+    layerHex: color => LAYER[color] || null,
   };
 })();

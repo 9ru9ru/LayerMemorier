@@ -20,7 +20,10 @@
       // 스크립트로 새 문서를 만들면 documentAfterActivate 없이 make(new: document)만 온다.
       const { id, data } = LMHost.eventInfo(ev);
       const newDoc = id === ids.make && data.new && data.new._obj === 'document';
-      if (id === ids.docActivate || id === ids.close || newDoc) docChanged = true;
+      // setd 는 레이어 색이 바뀐 경우만 본다 (그 밖의 속성 변경은 무시). 패널은 색을 바꾸지 않으므로 메아리가 아니다.
+      const colorChange = id === ids.set && data.to && data.to._obj === 'layer' && data.to.color;
+      if (id === ids.set && !colorChange) return;
+      if (id === ids.docActivate || id === ids.close || newDoc || colorChange) docChanged = true;
       clearTimeout(timer);
       timer = setTimeout(() => {
         const force = docChanged;

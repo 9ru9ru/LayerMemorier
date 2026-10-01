@@ -31,7 +31,7 @@ test('getDocInfo is null without document', () => {
 
 test('eventIds are numbers', () => {
   const ids = psCall('eventIds');
-  for (const k of ['select', 'make', 'del', 'show', 'hide', 'move', 'docActivate', 'close']) {
+  for (const k of ['select', 'make', 'del', 'show', 'hide', 'move', 'docActivate', 'close', 'set']) {
     assert.equal(typeof ids[k], 'number', k);
   }
 });
