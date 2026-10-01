@@ -72,3 +72,43 @@ test('golden: 알싸기 80 file names', () => {
   assert.equal(names.length, 80);
   assert.deepEqual(names, golden);
 });
+
+// export spec §4: 폴더 이름 방식, 접미사, 대소문자, 형식별 확장자.
+function birthDoc(output) {
+  const costume = cat('C', '의상', ['기본의상'], '{v}');
+  const clothes = cat('O', '옷', ['0', '1', '2'], '{c}{v}', true);
+  return { baseName: '출산', delimiter: '_', categories: [costume, clothes], output };
+}
+const birthVariation = { C: 'C:기본의상', O: 'O:2' };
+
+test('cumulative folder names carry the base name and every token so far (default)', () => {
+  assert.equal(relativePath(birthDoc(undefined), birthVariation), '출산_기본의상_옷2/출산_기본의상_옷2.png');
+  assert.equal(relativePath(birthDoc({ folderName: 'cumulative' }), birthVariation), '출산_기본의상_옷2/출산_기본의상_옷2.png');
+});
+
+test('value folder names use only that category token', () => {
+  assert.equal(relativePath(birthDoc({ folderName: 'value' }), birthVariation), '옷2/출산_기본의상_옷2.png');
+});
+
+test('value folder with an empty label adds no folder level', () => {
+  const doc = birthDoc({ folderName: 'value' });
+  doc.categories[1].values[2].label = '';
+  assert.equal(relativePath(doc, birthVariation), '출산_기본의상.png');
+});
+
+test('suffix and format extension go at the end of the file name', () => {
+  const doc = { baseName: 'fx', delimiter: '_', categories: [cat('A', 'A', ['0', '1'], '{c}{v}'), cat('B', 'B', ['x'])] };
+  const v = { A: 'A:1', B: 'B:x' };
+  assert.equal(relativePath(Object.assign({ output: { format: 'jpg', suffix: '@2x' } }, doc), v), 'fx_A1_x@2x.jpg');
+  for (const [format, ext] of [['png8', 'png'], ['tif', 'tif'], ['tga', 'tga'], ['bmp', 'bmp'], ['psd', 'psd']]) {
+    assert.equal(relativePath(Object.assign({ output: { format } }, doc), v), 'fx_A1_x.' + ext);
+  }
+});
+
+test('letter case applies to folders and the whole file name', () => {
+  const doc = { baseName: 'Fx', delimiter: '_', categories: [cat('A', 'Ab', ['0'], '{c}{v}', true)] };
+  const v = { A: 'A:0' };
+  assert.equal(relativePath(Object.assign({ output: { letterCase: 'upper', suffix: 'x' } }, doc), v), 'FX_AB0/FX_AB0X.PNG');
+  assert.equal(relativePath(Object.assign({ output: { letterCase: 'lower' } }, doc), v), 'fx_ab0/fx_ab0.png');
+  assert.equal(relativePath(Object.assign({ output: { letterCase: 'keep' } }, doc), v), 'Fx_Ab0/Fx_Ab0.png');
+});

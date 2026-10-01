@@ -1,8 +1,8 @@
-// spec §5.3 파일명, §5.4 폴더.
+// spec §5.3 파일명, §5.4 폴더 + export spec §4 (폴더 이름 방식, 접미사, 대소문자, 확장자).
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory();
-  else { root.LMCore = root.LMCore || {}; root.LMCore.naming = factory(); }
-})(typeof self !== 'undefined' ? self : this, function () {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./output'));
+  else { root.LMCore = root.LMCore || {}; root.LMCore.naming = factory(root.LMCore.output); }
+})(typeof self !== 'undefined' ? self : this, function (output) {
   'use strict';
 
   const FORBIDDEN = /[\\/:*?"<>|]/g;
@@ -28,17 +28,24 @@
   }
 
   function relativePath(doc, variation) {
+    const out = output.normalize(doc.output);
     const base = sanitize(doc.baseName);
     const delimiter = doc.delimiter == null ? '_' : doc.delimiter;
     const tokens = [];
     const folders = [];
     for (const category of doc.categories) {
       const value = category.values.find(v => v.id === variation[category.id]);
-      tokens.push(value ? token(category, value) : '');
-      if (category.folder) folders.push(join([base].concat(tokens), delimiter));
+      const t = value ? token(category, value) : '';
+      tokens.push(t);
+      if (!category.folder) continue;
+      if (out.folderName === 'value') { if (t !== '') folders.push(t); }
+      else folders.push(join([base].concat(tokens), delimiter));
     }
-    const file = join([base].concat(tokens), delimiter) + '.png';
-    return folders.concat([file]).join('/');
+    const file = join([base].concat(tokens), delimiter) + out.suffix + '.' + output.extension(out.format);
+    const path = folders.concat([file]).join('/');
+    if (out.letterCase === 'lower') return path.toLowerCase();
+    if (out.letterCase === 'upper') return path.toUpperCase();
+    return path;
   }
 
   return { sanitize, token, relativePath };
