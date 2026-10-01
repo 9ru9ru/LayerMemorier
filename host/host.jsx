@@ -93,7 +93,8 @@ var LM = LM || {};
         visible: d.getBoolean(cid('Vsbl')),
         depth: stack.length,
         parentId: stack.length ? stack[stack.length - 1] : null,
-        color: typeIDToStringID(d.getEnumerationValue(cid('Clr ')))
+        // A lone Background layer has no 'Clr ' key; reading it threw and broke the whole list.
+        color: d.hasKey(cid('Clr ')) ? typeIDToStringID(d.getEnumerationValue(cid('Clr '))) : 'none'
       };
       out.push(item);
       if (item.kind === 'group') stack.push(item.id);

@@ -36,6 +36,34 @@ test('getLayers returns tree in top-down order with ids and groups', () => {
   for (const l of layers) assert.equal(l.color, 'none');
 });
 
+// 실제 PSD 는 맨 아래가 배경(Background) 레이어인 경우가 많다. 배경 레이어에는 레이어 색
+// 속성이 없어 그대로 읽으면 getLayers 전체가 실패하고, 패널은 그 문서를 아예 못 연다.
+test('getLayers reads a document whose bottom layer is a Background layer', () => {
+  psRun('while (app.documents.length) app.activeDocument.close(SaveOptions.DONOTSAVECHANGES); app.documents.add(20, 20, 72, "lm-bg", NewDocumentMode.RGB, DocumentFill.WHITE); app.activeDocument.artLayers.add().name = "top"; "ok"');
+  try {
+    const bgName = psRun('app.activeDocument.backgroundLayer.name');
+    const layers = psCall('getLayers');
+    assert.deepEqual(layers.map(l => l.name), ['top', bgName]);
+    assert.equal(layers[1].kind, 'layer');
+    assert.equal(layers[1].color, 'none');
+    assert.equal(typeof layers[1].id, 'number');
+  } finally {
+    psRun('app.activeDocument.close(SaveOptions.DONOTSAVECHANGES); "closed"');
+  }
+});
+
+test('getLayers reads a document that has only a Background layer', () => {
+  psRun('while (app.documents.length) app.activeDocument.close(SaveOptions.DONOTSAVECHANGES); app.documents.add(20, 20, 72, "lm-bg-only", NewDocumentMode.RGB, DocumentFill.WHITE); "ok"');
+  try {
+    const bgName = psRun('app.activeDocument.backgroundLayer.name');
+    const layers = psCall('getLayers');
+    assert.deepEqual(layers.map(l => l.name), [bgName]);
+    assert.equal(layers[0].color, 'none');
+  } finally {
+    psRun('app.activeDocument.close(SaveOptions.DONOTSAVECHANGES); "closed"');
+  }
+});
+
 test('selectLayers / getSelectedLayerIds round-trip (multi-select)', () => {
   const { byName } = buildFixture();
   psCall('selectLayers', [byName.B1, byName.GA]);
