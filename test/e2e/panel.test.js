@@ -880,3 +880,95 @@ test('export run reports host error codes in Korean and counts renamed files', a
     p.close();
   }
 });
+
+const firstPreviewLine = `document.querySelector('#tab-export .preview').textContent.split('\\n')[0]`;
+
+test('export tab: format options follow the format; numbers are clamped; other formats keep their values', async () => {
+  const { byName } = buildFixture();
+  psCall('writeDocData', docDataFor(byName));
+  const p = await freshPanel();
+  try {
+    await p.eval(`document.querySelector('#tabs [data-tab=export]').click(); true`);
+    const has = sel => p.eval(`!!document.querySelector('#tab-export ${sel}')`);
+    assert.equal(await has('[data-out="png24.interlaced"]'), true);
+    await p.eval(setField('#tab-export select[data-out=format]', 'png8'));
+    await settle();
+    assert.equal(await has('[data-out="png24.interlaced"]'), false);
+    assert.equal(await has('[data-out="png8.colors"]'), true);
+    assert.equal(psCall('readDocData').output.format, 'png8');
+    await p.eval(setField('#tab-export select[data-out="png8.dither"]', 'noise'));
+    await settle();
+    assert.equal(await p.eval(`document.querySelector('#tab-export [data-out="png8.ditherAmount"]').disabled`), true, 'amount only for diffusion');
+    await p.eval(setField('#tab-export select[data-out=format]', 'jpg'));
+    await settle();
+    await p.eval(setField('#tab-export [data-out="jpg.quality"]', '150'));
+    await settle();
+    assert.equal(psCall('readDocData').output.jpg.quality, 100);
+    assert.equal(await p.eval(`document.querySelector('#tab-export [data-out="jpg.quality"]').value`), '100', 'field redrawn with the clamped value');
+    assert.equal(psCall('readDocData').output.png8.dither, 'noise', 'PNG-8 settings survive a format switch');
+    // BMP RLE 는 16·24·32비트에 없다 (2026-10-02 실측: 32비트 + RLE 저장 실패). 칸을 막고 이유를 보인다.
+    await p.eval(setField('#tab-export select[data-out=format]', 'bmp'));
+    await settle();
+    assert.equal(await p.eval(`document.querySelector('#tab-export [data-out="bmp.rle"]').disabled`), true);
+    assert.match(await p.eval(`document.querySelector('#tab-export [data-out="bmp.rle"]').closest('label').title`), /RLE/);
+    assert.equal(JSON.parse(fs.readFileSync(EXPORT_DEFAULTS, 'utf8')).format, 'bmp', 'every change updates the last-used settings');
+  } finally {
+    clearExportDefaults();
+    p.close();
+  }
+});
+
+test('export tab: suffix, letter case, format and folder grouping show in the preview paths', async () => {
+  const { byName } = buildFixture();
+  psCall('writeDocData', docDataFor(byName));
+  const p = await freshPanel();
+  try {
+    await p.eval(`document.querySelector('#tabs [data-tab=export]').click(); true`);
+    assert.equal(await p.eval(firstPreviewLine), 'fx_A0/fx_A0_0_1.png');
+    await p.eval(setField('#tab-export [data-out=suffix]', '@2x'));
+    await settle();
+    await p.eval(setField('#tab-export select[data-out=letterCase]', 'upper'));
+    await settle();
+    await p.eval(setField('#tab-export select[data-out=format]', 'jpg'));
+    await settle();
+    assert.equal(await p.eval(firstPreviewLine), 'FX_A0/FX_A0_0_1@2X.JPG');
+    await p.eval(`document.querySelector('#tab-export [data-folder-cat=cB]').click(); true`);
+    await settle();
+    assert.equal(psCall('readDocData').categories.find(c => c.id === 'cB').folder, true);
+    assert.equal(await p.eval(firstPreviewLine), 'FX_A0/FX_A0_0/FX_A0_0_1@2X.JPG');
+    await p.eval(setField('#tab-export select[data-out=folderName]', 'value'));
+    await settle();
+    assert.equal(await p.eval(firstPreviewLine), 'A0/0/FX_A0_0_1@2X.JPG');
+    await p.eval(`document.querySelector('#tabs [data-tab=categories]').click(); true`);
+    assert.equal(await p.eval(`document.querySelector('#tab-categories [data-field=folder]')`), null, 'folder checkbox lives only in the export tab');
+  } finally {
+    clearExportDefaults();
+    p.close();
+  }
+});
+
+test('export tab: run-only values, always-excluded combos and warnings are collapsible', async () => {
+  const { byName } = buildFixture();
+  psCall('writeDocData', docDataFor(byName));
+  const p = await freshPanel();
+  try {
+    await p.eval(`document.querySelector('#tabs [data-tab=export]').click(); true`);
+    const det = name => p.eval(`(() => { const d = document.querySelector('#tab-export details[data-open=${name}]'); return d ? { open: d.open, text: d.querySelector('summary').textContent } : null; })()`);
+    assert.deepEqual(await det('include'), { open: false, text: '이번만 내보낼 값 (저장 안 됨)' });
+    assert.deepEqual(await det('exclude'), { open: false, text: '항상 뺄 조합 (PSD에 저장)' });
+    assert.equal(await det('warnings'), null, 'no warnings, no box');
+    await p.eval(`document.querySelector('#tab-export .include input[data-category=cN][data-value=n1]').click(); true`);
+    assert.equal((await det('include')).open, true, 'opens once a value is unchecked');
+    await p.eval(`LMState.docData.combos.push({ when: { cA: 'a0' }, layers: [999999] }); LMApp.render(); true`);
+    assert.deepEqual(await det('warnings'), { open: false, text: '경고 1개' });
+    for (const [label, w, h] of [['export-520', 520, 760], ['export-900', 900, 760]]) {
+      await p.emulate(w, h);
+      await p.eval('LMApp.render(); true');
+      await p.shot(label);
+      assert.ok(await p.eval(`document.documentElement.scrollWidth <= window.innerWidth + 1`), label + ': no horizontal scroll');
+    }
+  } finally {
+    await p.emulate(null).catch(() => {});
+    p.close();
+  }
+});

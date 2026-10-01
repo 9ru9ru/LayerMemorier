@@ -54,7 +54,6 @@ LMUI.categories = (() => {
           <span class="dot" style="background:${LMColors.hex(c.color)}"></span>
           <input class="c-name" data-field="name" value="${esc(c.name)}" placeholder="카테고리 이름">
           <select data-field="labelFormat" title="값이 파일명에 어떤 모양으로 들어갈지">${formats}</select>
-          <label title="이 단계에서 폴더로 묶기"><input type="checkbox" data-field="folder" ${c.folder ? 'checked' : ''}> 폴더</label>
           <button data-action="cat-up" ${i === 0 ? 'disabled' : ''}>▲</button>
           <button data-action="cat-down" ${i === n - 1 ? 'disabled' : ''}>▼</button>
           <button data-action="cat-delete" title="카테고리 삭제">×</button>

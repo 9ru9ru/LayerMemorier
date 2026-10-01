@@ -45,10 +45,18 @@ LMUI.export = (() => {
 
   function settings(d) {
     return `
-      <div class="row"><label>출력명 <input data-field="baseName" value="${esc(d.baseName)}"></label>
-        <label>구분자 <input data-field="delimiter" value="${esc(d.delimiter)}" style="width:3em"></label></div>
-      <div class="row"><label>출력 폴더 <input data-field="destination" value="${esc(d.destination)}" style="width:220px"></label>
+      <div class="out-row"><b class="out-label">출력</b>
+        <label class="opt">출력명<input data-field="baseName" value="${esc(d.baseName)}"></label>
+        <label class="opt">구분자<input data-field="delimiter" value="${esc(d.delimiter)}" style="width:3em"></label></div>
+      <div class="out-row"><b class="out-label"></b>
+        <label class="opt">출력 폴더<input data-field="destination" value="${esc(d.destination)}" style="width:260px"></label>
         <button data-action="pick-folder">폴더…</button></div>`;
+  }
+
+  // <details> 는 사용자가 펼치거나 접은 상태를 세션 동안 기억하고, 처음에는 내용이 있으면 펼친다.
+  function openAttr(name, defaultOpen) {
+    const s = LMState.exportOpen[name];
+    return (s == null ? defaultOpen : s) ? 'open' : '';
   }
 
   function includeBlock(d) {
@@ -60,18 +68,18 @@ LMUI.export = (() => {
       }).join('');
       return `<div class="row"><span class="dot" style="background:${LMColors.hex(c.color)}"></span><b>${esc(c.name)}</b>${boxes}</div>`;
     }).join('');
-    return `<details open class="include"><summary>부분 출력 (체크한 값만)</summary>${lines}</details>`;
+    return `<details class="include" data-open="include" ${openAttr('include', Object.keys(LMState.include).length > 0)}><summary>이번만 내보낼 값 (저장 안 됨)</summary>${lines}</details>`;
   }
 
   function excludeBlock(d) {
     const rows = d.excluded.map((x, i) => `<div class="row"><span>${Object.keys(x).map(cid => esc(valueName(cid, x[cid]))).join(' + ')}</span><button data-action="exclude-delete" data-index="${i}">×</button></div>`).join('');
     const selects = d.categories.map(c => `<select data-category="${esc(c.id)}"><option value="">${esc(c.name)}: 무관</option>${c.values.map(v => `<option value="${esc(v.id)}">${esc(v.name)}</option>`).join('')}</select>`).join('');
-    return `<details open class="exclude"><summary>제외 조합</summary>${rows}<div class="row exclude-new">${selects}<button data-action="exclude-add">추가</button></div></details>`;
+    return `<details class="exclude" data-open="exclude" ${openAttr('exclude', d.excluded.length > 0)}><summary>항상 뺄 조합 (PSD에 저장)</summary>${rows}<div class="row exclude-new">${selects}<button data-action="exclude-add">추가</button></div></details>`;
   }
 
   function previewBlock(pv) {
     const conflicts = pv.conflicts.length ? `<p class="err conflicts">충돌: 같은 파일명이 두 번 이상 나옵니다 — ${pv.conflicts.map(esc).join(', ')}</p>` : '';
-    const warnings = pv.warnings.length ? `<ul class="warn">${pv.warnings.map(w => `<li>${esc(warningText(w))}</li>`).join('')}</ul>` : '';
+    const warnings = pv.warnings.length ? `<details class="warnings" data-open="warnings" ${openAttr('warnings', false)}><summary>경고 ${pv.warnings.length}개</summary><ul class="warn">${pv.warnings.map(w => `<li>${esc(warningText(w))}</li>`).join('')}</ul></details>` : '';
     return `<div class="row"><b>배리에이션 <span class="count">${pv.variations.length}</span>개</b></div>${conflicts}${warnings}
       <div class="preview">${pv.jobs.map(j => esc(j.relativePath)).join('\n')}</div>`;
   }
@@ -97,7 +105,7 @@ LMUI.export = (() => {
   function render(el) {
     const d = LMState.docData;
     const pv = preview();
-    el.innerHTML = settings(d) + includeBlock(d) + excludeBlock(d) + previewBlock(pv) + runBlock(pv);
+    el.innerHTML = settings(d) + LMUI.outputOptions.render(d) + includeBlock(d) + excludeBlock(d) + previewBlock(pv) + runBlock(pv);
   }
 
   async function run() {
@@ -243,6 +251,13 @@ LMUI.export = (() => {
       LMApp.status(err.message);
     }
   });
+
+  // toggle 은 버블링하지 않으므로 캡처로 받는다.
+  document.addEventListener('toggle', e => {
+    const det = e.target;
+    if (!det || !det.dataset || !det.dataset.open || !det.closest('#tab-export')) return;
+    LMState.exportOpen[det.dataset.open] = det.open;
+  }, true);
 
   return { render, run, preview };
 })();

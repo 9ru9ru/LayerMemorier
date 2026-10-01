@@ -10,6 +10,7 @@ const LMState = {
   combo: {},          // 레이어 탭에서 고른 조합 {categoryId: valueId} (세션)
   anchorId: null,     // Shift 범위 선택의 시작 행 id
   previews: {},       // 포토샵 미리보기 {docKey: {snapshot: {layerId: visible}, touched: [layerId], combo: 반영한 조합}} (세션)
+  exportOpen: {},     // 내보내기 탭 <details> 펼침 상태 {include, exclude, warnings} (세션)
   echoUntil: 0,       // 이 시각(ms) 전까지는 포토샵 이벤트를 패널 자신의 메아리로 보고 무시
   renderedTab: null,  // 직전에 그린 탭 (스크롤 복원 판단용)
   tab: 'categories',

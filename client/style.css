@@ -62,3 +62,17 @@ main.fill > .tab.active { flex: 1; min-height: 0; display: flex; flex-direction:
 .progress > div { height: 100%; background: #4a90e2; }
 .combo-bar .preview-toggle { display: inline-flex; align-items: center; gap: 3px; margin-left: 8px; }
 .combo-bar .preview-label { font-size: 11px; margin-left: 6px; }
+/* 내보내기 설정 (export spec §6). Chromium 63은 flex gap을 모르므로 margin으로 띄운다. */
+.out-row { display: flex; align-items: center; flex-wrap: wrap; margin: 3px 0; }
+.out-row > * { margin: 2px 12px 2px 0; }
+.out-row .out-label { flex: 0 0 34px; margin-right: 6px; }
+.out-row .opt { display: inline-flex; align-items: center; white-space: nowrap; }
+.out-row .opt > input, .out-row .opt > select { margin: 0 4px; }
+.out-row .opt > .dot { margin: 0 4px 0 2px; }
+.out-row .num { width: 5em; }
+.out-row .short { width: 6em; }
+.out-row select { font: inherit; }
+.format-options { padding-left: 40px; }
+#tab-export details { margin: 6px 0; }
+#tab-export details > summary { cursor: pointer; color: #bbb; }
+.out-row input:disabled, .out-row select:disabled { opacity: .4; }
