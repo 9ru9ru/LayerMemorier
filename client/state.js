@@ -59,12 +59,29 @@ const LMApp = {
     el.textContent = msg || '';
   },
 
+  // 포토샵에서 전부 읽은 뒤 LMState에 한꺼번에 넣는다. docInfo를 먼저 바꾸고 나머지를 나중에
+  // 읽으면, 그 사이의 저장이 새 문서 확인(writeDocData)을 통과해 이전 문서의 조합을 새 문서에 쓴다.
   async refresh() {
     let notice = '';
     try {
       const info = await LMHost.call('getDocInfo');
-      LMState.docInfo = info;
       const key = info ? (info.path || info.name) : null;
+      const openKeys = info ? await LMHost.call('getOpenDocKeys') : [];
+      let layers = [], selectedIds = [], docData = null, dropped = 0;
+      if (info) {
+        layers = await LMHost.call('getLayers');
+        selectedIds = await LMHost.call('getSelectedLayerIds');
+        const stored = await LMHost.call('readDocData');
+        if (stored && stored.version === 1) {
+          // combos spec §4.2: 메모리에서 바꾸고, XMP에는 다음 저장 때 version 2로 쓰인다.
+          const m = LMCore.combos.migrate(stored);
+          docData = m.data;
+          dropped = m.dropped;
+        } else {
+          docData = stored || this.newDocData(info.name.replace(/\.[^.]+$/, ''));
+        }
+      }
+
       const fresh = key !== LMState.docKey;
       if (fresh) {
         // 문서가 바뀌었다. 부분 출력·조합 선택은 세션 값이라 저장되지 않으므로, 프리셋을
@@ -73,28 +90,18 @@ const LMApp = {
         LMState.combo = {};
         LMState.anchorId = null;
         LMState.docKey = key;
+        if (dropped) notice = `변환하면서 레이어 ${dropped}개의 마크를 버렸습니다 (없는 카테고리·값 참조)`;
       }
+      LMState.docInfo = info;
+      LMState.layers = layers;
+      LMState.selectedIds = selectedIds;
+      LMState.docData = docData;
       // 닫힌 문서의 미리보기 스냅샷은 버린다 (combos spec §6.3). 미리보기가 켜진 문서로
       // 돌아왔으면 캔버스에 반영된 조합으로 선택을 되돌린다 (위에서 {}로 비웠으므로).
-      LMPreview.prune(info ? await LMHost.call('getOpenDocKeys') : []);
+      LMPreview.prune(openKeys);
       if (fresh && key && LMState.previews[key]) LMState.combo = Object.assign({}, LMState.previews[key].combo);
-      if (!info) {
-        LMState.docData = null; LMState.layers = []; LMState.selectedIds = [];
-      } else {
-        LMState.layers = await LMHost.call('getLayers');
-        LMState.selectedIds = await LMHost.call('getSelectedLayerIds');
-        const stored = await LMHost.call('readDocData');
-        if (stored && stored.version === 1) {
-          // combos spec §4.2: 메모리에서 바꾸고, XMP에는 다음 저장 때 version 2로 쓰인다.
-          const m = LMCore.combos.migrate(stored);
-          LMState.docData = m.data;
-          if (fresh && m.dropped) notice = `변환하면서 레이어 ${m.dropped}개의 마크를 버렸습니다 (없는 카테고리·값 참조)`;
-        } else {
-          LMState.docData = stored || this.newDocData(info.name.replace(/\.[^.]+$/, ''));
-        }
-      }
       // 조합 선택(미리보기 기억에서 되돌린 것 포함)에 지금 없는 카테고리·값 키가 남지 않게 한다.
-      if (LMState.docData) LMState.combo = LMCore.combos.cleanWhen(LMState.combo, LMState.docData.categories);
+      if (docData) LMState.combo = LMCore.combos.cleanWhen(LMState.combo, docData.categories);
       this.status(notice);
     } catch (e) {
       this.status(e.message);

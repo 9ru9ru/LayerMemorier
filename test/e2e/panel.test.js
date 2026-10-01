@@ -698,3 +698,28 @@ test('document switches are never swallowed as the panel echo', async () => {
     p.close();
   }
 });
+
+// 리뷰 #3: 새로고침이 docInfo 를 먼저 바꾸고 레이어·문서 데이터를 나중에 읽으면, 그 사이의 저장이
+// 새 문서 확인을 통과해 이전 문서의 조합(이전 문서의 layerID)을 새 문서 XMP 에 쓴다.
+test('a save during a slow refresh never writes the previous document data into the new one', async () => {
+  const { byName } = buildFixture();
+  psCall('writeDocData', docDataFor(byName));
+  const p = await freshPanel();
+  try {
+    await p.eval(`
+      window.__origLMHostCall = LMHost.call;
+      LMHost.call = (fn, arg) => fn === 'getLayers'
+        ? new Promise(r => setTimeout(r, 2000)).then(() => window.__origLMHostCall(fn, arg))
+        : window.__origLMHostCall(fn, arg);
+      true`);
+    psRun('app.documents.add(10, 10, 72, "lm-race"); "added"');
+    await new Promise(r => setTimeout(r, 900));
+    await p.eval('LMApp.saveDocData().then(() => true)');
+    await new Promise(r => setTimeout(r, 3000));
+    assert.equal(psCall('readDocData'), null, '새 문서 XMP 에는 아무것도 쓰이지 않는다');
+  } finally {
+    await p.eval(`LMHost.call = window.__origLMHostCall; delete window.__origLMHostCall; true`).catch(() => {});
+    psRun('app.activeDocument.close(SaveOptions.DONOTSAVECHANGES); "closed"');
+    p.close();
+  }
+});
