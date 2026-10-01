@@ -7,6 +7,9 @@ const LMState = {
   selectedIds: [],    // 선택된 layerId
   collapsed: new Set(), // 접힌 그룹 id
   include: {},        // 부분 출력 {categoryId: valueId[]} (세션)
+  combo: {},          // 레이어 탭에서 고른 조합 {categoryId: valueId} (세션)
+  anchorId: null,     // Shift 범위 선택의 시작 행 id
+  previews: {},       // 포토샵 미리보기 {docKey: {snapshot: {layerId: visible}, touched: [layerId], combo: 반영한 조합}} (세션)
   echoUntil: 0,       // 이 시각(ms) 전까지는 포토샵 이벤트를 패널 자신의 메아리로 보고 무시
   renderedTab: null,  // 직전에 그린 탭 (스크롤 복원 판단용)
   tab: 'categories',
@@ -20,7 +23,7 @@ const LMApp = {
   uid(prefix) { return prefix + '_' + Math.random().toString(36).slice(2, 8); },
 
   newDocData(baseName) {
-    return { version: 1, baseName: baseName || '', delimiter: '_', destination: '', nativeColor: true, categories: [], marks: {}, excluded: [] };
+    return { version: 2, baseName: baseName || '', delimiter: '_', destination: '', categories: [], combos: [], excluded: [] };
   },
 
   newCategory() {
@@ -31,29 +34,10 @@ const LMApp = {
 
   newValue(name) { return { id: this.uid('v'), name: String(name), label: String(name) }; },
 
-  // 카테고리(valueId=null) 또는 값을 참조하는 마크 항목을 지운다 (spec §6.1)
-  removeMarksFor(categoryId, valueId) {
-    const marks = LMState.docData.marks;
-    for (const layerId of Object.keys(marks)) {
-      const mark = marks[layerId];
-      if (!mark[categoryId]) continue;
-      if (valueId === null) delete mark[categoryId];
-      else {
-        mark[categoryId] = mark[categoryId].filter(v => v !== valueId);
-        if (!mark[categoryId].length) delete mark[categoryId];
-      }
-      if (!Object.keys(mark).length) delete marks[layerId];
-    }
-  },
-
-  // removeMarksFor가 건드릴 레이어 수. 지우기 전에 확인·보고하는 데 쓴다 (spec §6.1).
-  countMarksFor(categoryId, valueId) {
-    const marks = LMState.docData.marks;
-    return Object.keys(marks).filter(layerId => {
-      const entry = marks[layerId][categoryId];
-      return !!entry && (valueId === null || entry.includes(valueId));
-    }).length;
-  },
+  // 패널이 일으킨 포토샵 이벤트(선택·가시성 변경)는 그대로 되돌아온다. 그 메아리로
+  // 레이어 목록을 통째로 다시 읽으면 클릭한 자리에서 스크롤이 튄다.
+  // 300ms 동안은 main.js의 디바운스가 새로고침을 건너뛴다.
+  muteEcho() { LMState.echoUntil = Date.now() + 300; },
 
   // 패널이 알고 있는 문서를 같이 보낸다. 호스트가 활성 문서와 다르면 거부하므로
   // docInfo가 낡았을 때 다른 문서의 XMP를 덮어쓰는 일이 없다.
@@ -76,14 +60,18 @@ const LMApp = {
   },
 
   async refresh() {
+    let notice = '';
     try {
       const info = await LMHost.call('getDocInfo');
       LMState.docInfo = info;
       const key = info ? (info.path || info.name) : null;
-      if (key !== LMState.docKey) {
-        // 문서가 바뀌었다. 부분 출력은 세션 값이라 저장되지 않으므로, 프리셋을
+      const fresh = key !== LMState.docKey;
+      if (fresh) {
+        // 문서가 바뀌었다. 부분 출력·조합 선택은 세션 값이라 저장되지 않으므로, 프리셋을
         // 공유하는 다른 PSD에 같은 카테고리 id로 그대로 걸리지 않게 여기서 비운다.
         LMState.include = {};
+        LMState.combo = {};
+        LMState.anchorId = null;
         LMState.docKey = key;
       }
       if (!info) {
@@ -92,9 +80,16 @@ const LMApp = {
         LMState.layers = await LMHost.call('getLayers');
         LMState.selectedIds = await LMHost.call('getSelectedLayerIds');
         const stored = await LMHost.call('readDocData');
-        LMState.docData = stored || this.newDocData(info.name.replace(/\.[^.]+$/, ''));
+        if (stored && stored.version === 1) {
+          // combos spec §4.2: 메모리에서 바꾸고, XMP에는 다음 저장 때 version 2로 쓰인다.
+          const m = LMCore.combos.migrate(stored);
+          LMState.docData = m.data;
+          if (fresh && m.dropped) notice = `변환하면서 레이어 ${m.dropped}개의 마크를 버렸습니다 (없는 카테고리·값 참조)`;
+        } else {
+          LMState.docData = stored || this.newDocData(info.name.replace(/\.[^.]+$/, ''));
+        }
       }
-      this.status('');
+      this.status(notice);
     } catch (e) {
       this.status(e.message);
     }

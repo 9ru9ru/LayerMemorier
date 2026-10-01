@@ -87,66 +87,6 @@ test('panel boots, sees the fixture document, and applies a preset', async () =>
   }
 });
 
-test('layer tab: badges, selection sync, marking writes XMP and native color', async () => {
-  const { byName, layers } = buildFixture();
-  psCall('writeDocData', docDataFor(byName));
-  const p = await freshPanel();
-  try {
-    await p.eval(`document.querySelector('#tabs [data-tab=layers]').click(); true`);
-    assert.equal(await p.eval(`document.querySelectorAll('#tab-layers .layer-row').length`), 12);
-    assert.equal(await p.eval(`document.querySelector('#tab-layers [data-layer="${byName.A0}"] .badge').textContent`), 'A: 0');
-    assert.equal(await p.eval(`document.querySelectorAll('#tab-layers [data-layer="${byName.BG}"] .badge').length`), 0);
-
-    // Photoshop 선택 → 패널 선택
-    psCall('selectLayers', [byName.B1]);
-    await new Promise(r => setTimeout(r, 800));
-    assert.deepEqual(await p.eval('LMState.selectedIds'), [byName.B1]);
-    assert.equal(await p.eval(`document.querySelector('#tab-layers [data-layer="${byName.B1}"]').classList.contains('selected')`), true);
-
-    // 패널 클릭 → Photoshop 선택
-    await p.eval(`document.querySelector('#tab-layers [data-layer="${byName.H}"] .name').click(); true`);
-    await new Promise(r => setTimeout(r, 500));
-    assert.deepEqual(psCall('getSelectedLayerIds'), [byName.H]);
-
-    // 마킹: H 에 A=a0 추가 → XMP 반영 + 네이티브 색 (nativeColor 켜기)
-    await p.eval('LMState.docData.nativeColor = true; true');
-    await p.eval(`document.querySelector('#tab-layers .mark-panel input[data-category=cA][data-value=a0]').click(); true`);
-    await new Promise(r => setTimeout(r, 800));
-    assert.deepEqual(psCall('readDocData').marks[String(byName.H)], { cA: ['a0'] });
-    assert.equal(psCall('getLayers').find(l => l.name === 'H').color, 'red');
-
-    // 해제 → 마크 삭제 + 색 none
-    await p.eval(`document.querySelector('#tab-layers .mark-panel input[data-category=cA][data-value=a0]').click(); true`);
-    await new Promise(r => setTimeout(r, 800));
-    assert.equal(psCall('readDocData').marks[String(byName.H)], undefined);
-    assert.equal(psCall('getLayers').find(l => l.name === 'H').color, 'none');
-
-    // 다중 선택 마킹 → setLayerColor 의 활성 레이어 부작용에도 포토샵 선택이 유지돼야 함
-    psCall('selectLayers', [byName.B0, byName.B2]);
-    await new Promise(r => setTimeout(r, 800));
-    assert.deepEqual((await p.eval('LMState.selectedIds')).slice().sort((a, b) => a - b), [byName.B0, byName.B2].sort((a, b) => a - b));
-    await p.eval(`document.querySelector('#tab-layers .mark-panel input[data-category=cA][data-value=a0]').click(); true`);
-    await new Promise(r => setTimeout(r, 800));
-    const stillSelected = psCall('getSelectedLayerIds');
-    assert.ok(stillSelected.includes(byName.B0), 'B0 stays selected after the native-color loop');
-    assert.ok(stillSelected.includes(byName.B2), 'B2 stays selected after the native-color loop');
-
-    // 그룹 접기
-    await p.eval(`document.querySelector('#tab-layers [data-layer="${byName.G}"] .caret').click(); true`);
-    assert.equal(await p.eval(`document.querySelectorAll('#tab-layers .layer-row').length`), 10);
-
-    // 고아 마크 표시
-    await p.eval(`LMState.docData.marks['999999'] = { cA: ['a0'] }; LMApp.render(); true`);
-    assert.match(await p.eval(`document.querySelector('#tab-layers .orphans').textContent`), /고아 마크 1개/);
-    await p.eval(`document.querySelector('[data-action=orphans-clean]').click(); true`);
-    await new Promise(r => setTimeout(r, 500));
-    assert.equal(await p.eval(`LMState.docData.marks['999999']`), undefined);
-    await p.shot('panel-layers');
-  } finally {
-    p.close();
-  }
-});
-
 test('export tab: preview, exclusion, partial include, run with progress and summary', async () => {
   const DEST = path.join(__dirname, '..', 'out', 'panel-export');
   fs.rmSync(DEST, { recursive: true, force: true });
@@ -157,6 +97,7 @@ test('export tab: preview, exclusion, partial include, run with progress and sum
     await p.eval(`document.querySelector('#tabs [data-tab=export]').click(); true`);
     assert.equal(await p.eval(`document.querySelector('#tab-export .count').textContent`), '12');
     assert.equal(await p.eval(`document.querySelector('#tab-export [data-field=baseName]').value`), 'fx');
+    assert.equal(await p.eval(`document.querySelector('#tab-export [data-field=nativeColor]')`), null, '레이어 색 옵션은 없다');
 
     // 제외 조합 추가: A=1, B=2 → 12 - 2 = 10
     await p.eval(`document.querySelector('#tab-export .exclude-new [data-category=cA]').value = 'a1';
@@ -263,39 +204,41 @@ test('confirm/prompt paths: value delete, category delete, preset save, preset a
     try {
       await stubDialogs(p);
 
-      // --- 값 삭제: 마크가 걸려 있으면 먼저 묻고, 끝난 뒤 몇 개가 바뀌었는지 알린다.
+      // --- 값 삭제: 그 값을 쓰는 조합이 있으면 먼저 묻고, 끝난 뒤 몇 개가 지워졌는지 알린다.
+      // 레이어 탭에서 그 값을 골라 둔 상태였다면 그 선택도 같이 빠져야 한다.
+      await p.eval(`LMState.combo = { cA: 'a1', cB: 'b0' }; true`);
       const valueDelete = `document.querySelector('#tab-categories [data-category=cB] [data-value=b0] [data-action=value-delete]').click(); true`;
       await p.eval(`window.__confirmResult = false; window.__dialogs = []; true`);
       await p.eval(valueDelete);
       await settle();
-      assert.match(await p.eval(`window.__dialogs[0][1]`), /레이어 2개의 마크가 바뀝니다/);
+      assert.match(await p.eval(`window.__dialogs[0][1]`), /이 값을 쓰는 조합 1개도 지워집니다/);
       assert.equal(await p.eval(`LMState.docData.categories.find(c => c.id === 'cB').values.length`), 3, '취소하면 값이 남는다');
 
       await p.eval(`window.__confirmResult = true; true`);
       await p.eval(valueDelete);
       await settle();
       assert.equal(await p.eval(`LMState.docData.categories.find(c => c.id === 'cB').values.length`), 2);
-      assert.match(await p.eval(`document.getElementById('status').textContent`), /레이어 2개의 마크가 바뀌었습니다/);
-      assert.equal(await p.eval(`LMState.docData.marks['${byName.B0}']`), undefined, 'B0 의 마크는 b0 뿐이었으므로 항목째 사라진다');
-      assert.deepEqual(await p.eval(`LMState.docData.marks['${byName.GA}']`), undefined, 'GA 도 b0 뿐이었다');
+      assert.match(await p.eval(`document.getElementById('status').textContent`), /조합 1개가 지워졌습니다/);
+      assert.equal(await p.eval(`LMState.docData.combos.some(c => c.when.cB === 'b0')`), false);
+      assert.deepEqual(await p.eval('LMState.combo'), { cA: 'a1' }, '지운 값은 레이어 탭 선택에서도 빠진다');
 
-      // --- 카테고리 삭제: 카테고리와 그 카테고리를 참조하던 마크가 같이 사라진다.
+      // --- 카테고리 삭제: 카테고리와 그 카테고리를 쓰던 조합이 같이 사라진다.
       const catDelete = `document.querySelector('#tab-categories [data-category=cA] [data-action=cat-delete]').click(); true`;
-      await p.eval(`window.__confirmResult = false; true`);
+      await p.eval(`window.__confirmResult = false; window.__dialogs = []; true`);
       await p.eval(catDelete);
       await settle();
+      assert.match(await p.eval(`window.__dialogs[0][1]`), /카테고리 "A"를 지웁니다\. 이 카테고리를 쓰는 조합 2개도 지워집니다\./);
       assert.equal(await p.eval('LMState.docData.categories.length'), 3, '취소하면 카테고리가 남는다');
 
-      assert.equal(await p.eval(`Object.keys(LMState.docData.marks).filter(k => LMState.docData.marks[k].cA).length`), 3);
       await p.eval(`window.__confirmResult = true; true`);
       await p.eval(catDelete);
       await settle();
       assert.deepEqual(await p.eval('LMState.docData.categories.map(c => c.id)'), ['cB', 'cN']);
-      assert.equal(await p.eval(`Object.keys(LMState.docData.marks).filter(k => LMState.docData.marks[k].cA).length`), 0);
+      assert.equal(await p.eval(`LMState.docData.combos.some(c => 'cA' in c.when)`), false);
+      assert.deepEqual(await p.eval('LMState.combo'), {}, '지운 카테고리는 레이어 탭 선택에서도 빠진다');
       const afterDelete = psCall('readDocData');
       assert.deepEqual(afterDelete.categories.map(c => c.id), ['cB', 'cN'], 'XMP 에도 반영된다');
-      assert.equal(Object.keys(afterDelete.marks).filter(k => afterDelete.marks[k].cA).length, 0);
-      assert.equal(afterDelete.marks[String(byName.A0)], undefined, 'A0 의 마크는 cA 뿐이었다');
+      assert.equal(afterDelete.combos.some(c => 'cA' in c.when), false);
 
       // --- 프리셋 저장: prompt 로 받은 이름으로 presets.json 에 쓴다.
       await p.eval(`window.__promptResult = '한글 프리셋'; true`);
@@ -310,24 +253,26 @@ test('confirm/prompt paths: value delete, category delete, preset save, preset a
       await settle();
       assert.equal(JSON.parse(fs.readFileSync(PRESETS, 'utf8')).presets.length, 1, 'prompt 를 취소하면 아무것도 안 쓴다');
 
-      // --- 마크가 남아 있는 문서에 프리셋 적용 → 확인 후 마크가 전부 지워진다.
+      // --- 조합이 남아 있는 문서에 프리셋 적용 → 확인 후 조합이 전부 지워진다.
       const applyPreset = `(() => {
         const sel = document.getElementById('preset-select');
         sel.value = sel.options[1].value;
         document.querySelector('[data-action=preset-apply]').click();
         return sel.options[1].textContent;
       })()`;
-      assert.ok(Object.keys(await p.eval('LMState.docData.marks')).length > 0, '아직 마크가 남아 있어야 의미가 있다');
-      await p.eval(`window.__confirmResult = false; true`);
+      assert.ok((await p.eval('LMState.docData.combos.length')) > 0, '아직 조합이 남아 있어야 의미가 있다');
+      await p.eval(`window.__confirmResult = false; window.__dialogs = []; true`);
       assert.equal(await p.eval(applyPreset), '한글 프리셋');
       await settle();
-      assert.ok(Object.keys(await p.eval('LMState.docData.marks')).length > 0, '취소하면 마크가 남는다');
+      assert.match(await p.eval(`window.__dialogs[0][1]`), /현재 문서의 조합이 전부 지워집니다/);
+      assert.ok((await p.eval('LMState.docData.combos.length')) > 0, '취소하면 조합이 남는다');
 
-      await p.eval(`window.__confirmResult = true; true`);
+      await p.eval(`window.__confirmResult = true; LMState.combo = { cB: 'b1' }; true`);
       await p.eval(applyPreset);
       await settle();
-      assert.deepEqual(await p.eval('LMState.docData.marks'), {});
-      assert.deepEqual(psCall('readDocData').marks, {}, '마크가 지워진 상태가 XMP 에도 쓰인다');
+      assert.deepEqual(await p.eval('LMState.docData.combos'), []);
+      assert.deepEqual(await p.eval('LMState.combo'), {});
+      assert.deepEqual(psCall('readDocData').combos, [], '조합이 지워진 상태가 XMP 에도 쓰인다');
     } finally {
       await restoreDialogs(p).catch(() => {});
       p.close();
@@ -365,6 +310,43 @@ test('export tab: a start failure reports zero successes, not a negative count',
     assert.deepEqual(fs.existsSync(DEST) ? fs.readdirSync(DEST) : [], [], 'exportBegin failed before any file could be written');
   } finally {
     await p.eval(`LMHost.call = window.__origLMHostCall; delete window.__origLMHostCall; true`);
+    p.close();
+  }
+});
+
+test('version 1 document data is converted on load and saved as version 2 on the next change', async () => {
+  const { byName } = buildFixture();
+  const v2 = docDataFor(byName);
+  psCall('writeDocData', {
+    version: 1, baseName: 'fx', delimiter: '_', destination: '', nativeColor: true, categories: v2.categories, excluded: [],
+    marks: {
+      [byName.A0]: { cA: ['a0'] },
+      [byName.GA]: { cA: ['a1'], cB: ['b0', 'b1'] },
+      [byName.H]: { cZ: ['zz'] },
+    },
+  });
+  const sortCombos = list => list.slice().sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  const p = await freshPanel();
+  try {
+    assert.equal(await p.eval('LMState.docData.version'), 2);
+    assert.deepEqual(sortCombos(await p.eval('LMState.docData.combos')), sortCombos([
+      { when: { cA: 'a0' }, layers: [byName.A0] },
+      { when: { cA: 'a1', cB: 'b0' }, layers: [byName.GA] },
+      { when: { cA: 'a1', cB: 'b1' }, layers: [byName.GA] },
+    ]));
+    assert.match(await p.eval(`document.getElementById('status').textContent`), /레이어 1개의 마크를 버렸습니다/);
+    assert.equal(psCall('readDocData').version, 1, '읽기만 해서는 XMP 를 바꾸지 않는다');
+
+    await p.eval(`document.querySelector('#tabs [data-tab=export]').click(); true`);
+    await p.eval(setField('#tab-export [data-field=baseName]', 'fx2'));
+    await settle();
+    const stored = psCall('readDocData');
+    assert.equal(stored.version, 2);
+    assert.equal(stored.baseName, 'fx2');
+    assert.equal('marks' in stored, false);
+    assert.equal('nativeColor' in stored, false);
+    assert.equal(stored.combos.length, 3);
+  } finally {
     p.close();
   }
 });

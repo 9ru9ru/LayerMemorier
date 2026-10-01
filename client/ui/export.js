@@ -21,9 +21,9 @@ LMUI.export = (() => {
   }
 
   function warningText(w) {
-    if (w.type === 'orphan') return `고아 마크: 레이어 #${w.layerId} 가 문서에 없음`;
-    if (w.type === 'stale') return `"${layerName(w.layerId)}" 마크가 없는 ${w.detail.valueId ? '값' : '카테고리'}을 참조 (${w.detail.categoryId}${w.detail.valueId ? '/' + w.detail.valueId : ''})`;
-    if (w.type === 'parentHidden') return `"${layerName(w.layerId)}" 의 부모 그룹 "${layerName(w.detail.groupId)}" 이 마크 없이 꺼져 있어 어떤 배리에이션에서도 안 보임`;
+    if (w.type === 'orphan') return `문서에 없는 레이어 #${w.layerId} 가 조합에 남아 있음`;
+    if (w.type === 'stale') return `없는 카테고리·값을 쓰는 조합 "${LMCore.combos.comboName(w.detail.when, LMState.docData.categories)}" (내보내기에서 무시)`;
+    if (w.type === 'parentHidden') return `조합에 넣은 레이어 "${layerName(w.layerId)}" 의 부모 그룹 "${layerName(w.detail.groupId)}" 이 꺼져 있어 어떤 조합에서도 안 보임`;
     return JSON.stringify(w);
   }
 
@@ -32,8 +32,7 @@ LMUI.export = (() => {
       <div class="row"><label>출력명 <input data-field="baseName" value="${esc(d.baseName)}"></label>
         <label>구분자 <input data-field="delimiter" value="${esc(d.delimiter)}" style="width:3em"></label></div>
       <div class="row"><label>출력 폴더 <input data-field="destination" value="${esc(d.destination)}" style="width:220px"></label>
-        <button data-action="pick-folder">폴더…</button></div>
-      <div class="row"><label><input type="checkbox" data-field="nativeColor" ${d.nativeColor ? 'checked' : ''}> 마킹할 때 포토샵 레이어 색도 바꾸기</label></div>`;
+        <button data-action="pick-folder">폴더…</button></div>`;
   }
 
   function includeBlock(d) {
@@ -105,7 +104,7 @@ LMUI.export = (() => {
     LMApp.render();
     try {
       await LMApp.saveDocData();
-      await LMHost.call('exportBegin', { layerIds: LMCore.jobs.markedLayerIds(d.marks, LMState.layers) });
+      await LMHost.call('exportBegin', { layerIds: LMCore.combos.managedLayerIds(d.combos, LMState.layers) });
       for (const job of pv.jobs) {
         if (LMState.abort) break;
         LMState.progress.current = job.relativePath;

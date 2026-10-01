@@ -1,18 +1,17 @@
-// 배지 색 이름 ↔ 화면 hex ↔ 포토샵 네이티브 enum (spec §4.1, §7)
+// 카테고리 색 이름 ↔ 화면 hex (spec §4.1). 포토샵 레이어 색은 건드리지 않는다 (combos spec §2).
 const LMColors = (() => {
   const TABLE = {
-    red:    { hex: '#e5484d', native: 'red' },
-    orange: { hex: '#f5a623', native: 'orange' },
-    yellow: { hex: '#e3c000', native: 'yellowColor' },
-    green:  { hex: '#46b450', native: 'grain' },
-    blue:   { hex: '#3b82f6', native: 'blue' },
-    violet: { hex: '#8b5cf6', native: 'violet' },
-    gray:   { hex: '#9ca3af', native: 'gray' },
+    red: '#e5484d',
+    orange: '#f5a623',
+    yellow: '#e3c000',
+    green: '#46b450',
+    blue: '#3b82f6',
+    violet: '#8b5cf6',
+    gray: '#9ca3af',
   };
   const ORDER = ['red', 'orange', 'yellow', 'green', 'blue', 'violet', 'gray'];
   return {
     ORDER,
-    hex: name => (TABLE[name] || TABLE.gray).hex,
-    native: name => (TABLE[name] || TABLE.gray).native,
+    hex: name => TABLE[name] || TABLE.gray,
   };
 })();

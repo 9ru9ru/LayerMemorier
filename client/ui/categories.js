@@ -105,8 +105,10 @@ LMUI.categories = (() => {
     switch (btn.dataset.action) {
       case 'cat-add': cats.push(LMApp.newCategory()); return commit();
       case 'cat-delete': {
-        if (!confirm(`카테고리 "${c.name}"를 지웁니다. 이 카테고리를 참조하는 마크도 지워집니다.`)) return;
-        LMApp.removeMarksFor(c.id, null);
+        const n = LMCore.combos.countFor(LMState.docData.combos, c.id, null);
+        if (!confirm(`카테고리 "${c.name}"를 지웁니다.` + (n ? ` 이 카테고리를 쓰는 조합 ${n}개도 지워집니다.` : ''))) return;
+        LMState.docData.combos = LMCore.combos.removeFor(LMState.docData.combos, c.id, null);
+        delete LMState.combo[c.id];
         cats.splice(idx, 1);
         LMState.docData.excluded = LMState.docData.excluded.map(x => { const y = Object.assign({}, x); delete y[c.id]; return y; }).filter(x => Object.keys(x).length);
         return commit();
@@ -125,23 +127,25 @@ LMUI.categories = (() => {
       case 'value-delete': {
         const row = btn.closest('[data-value]');
         const v = c.values.find(v => v.id === row.dataset.value);
-        // 마킹은 되돌릴 수 없고(spec §1) 이 버튼은 편집 중인 입력칸 바로 옆에 있다.
-        // 지워질 마크가 있으면 먼저 묻고, 끝난 뒤 몇 개가 바뀌었는지 알린다.
-        const affected = LMApp.countMarksFor(c.id, v.id);
-        if (affected && !confirm(`값 "${v.name}"을 지웁니다. 레이어 ${affected}개의 마크가 바뀝니다. 계속할까요?`)) return;
-        LMApp.removeMarksFor(c.id, v.id);
+        // 조합은 되돌릴 수 없고(spec §1) 이 버튼은 편집 중인 입력칸 바로 옆에 있다.
+        // 지워질 조합이 있으면 먼저 묻고, 끝난 뒤 몇 개가 지워졌는지 알린다.
+        const affected = LMCore.combos.countFor(LMState.docData.combos, c.id, v.id);
+        if (affected && !confirm(`값 "${v.name}"을 지웁니다. 이 값을 쓰는 조합 ${affected}개도 지워집니다. 계속할까요?`)) return;
+        LMState.docData.combos = LMCore.combos.removeFor(LMState.docData.combos, c.id, v.id);
+        if (LMState.combo[c.id] === v.id) delete LMState.combo[c.id];
         c.values.splice(c.values.indexOf(v), 1);
         LMState.docData.excluded = LMState.docData.excluded.filter(x => x[c.id] !== v.id);
-        LMApp.status(affected ? `값 "${v.name}" 삭제 — 레이어 ${affected}개의 마크가 바뀌었습니다.` : `값 "${v.name}" 삭제`);
+        LMApp.status(affected ? `값 "${v.name}" 삭제 — 조합 ${affected}개가 지워졌습니다.` : `값 "${v.name}" 삭제`);
         return commit();
       }
       case 'preset-apply': {
         const id = document.getElementById('preset-select').value;
         const p = presets.presets.find(p => p.id === id);
         if (!p) return LMApp.status('프리셋을 고르세요.');
-        if (Object.keys(LMState.docData.marks).length && !confirm('프리셋을 적용하면 현재 문서의 마크가 전부 지워집니다. 계속할까요?')) return;
+        if (LMState.docData.combos.length && !confirm('프리셋을 적용하면 현재 문서의 조합이 전부 지워집니다. 계속할까요?')) return;
         LMState.docData.categories = JSON.parse(JSON.stringify(p.categories));
-        LMState.docData.marks = {};
+        LMState.docData.combos = [];
+        LMState.combo = {};
         LMState.docData.excluded = [];
         return commit();
       }
