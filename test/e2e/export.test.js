@@ -8,31 +8,10 @@ const { psRun, psCall, ROOT } = require('../helpers/ps');
 const { buildFixture, docDataFor } = require('../helpers/fixture');
 const { enumerate } = require('../../core/variation');
 const { buildJobs } = require('../../core/jobs');
+const { CELL, expectedOn } = require('../helpers/cells');
 const { managedLayerIds } = require('../../core/combos');
 
 const DEST = path.join(ROOT, 'test', 'out', 'export', '한글 폴더');
-const CELL = {
-  A0: [0, 0, [255, 0, 0]], A1: [1, 0, [0, 255, 0]], B0: [2, 0, [0, 0, 255]], B1: [3, 0, [255, 255, 0]],
-  B2: [4, 0, [0, 255, 255]], N1: [5, 0, [255, 0, 255]], N2: [0, 1, [128, 128, 128]],
-  GA: [1, 1, [255, 128, 0]], GB: [2, 1, [128, 0, 255]], H: [3, 1, [0, 0, 0]], BG: [4, 1, [255, 255, 255]],
-};
-
-function expectedOn(name, v) {
-  switch (name) {
-    case 'A0': return v.cA === 'a0';
-    case 'A1': return v.cA === 'a1';
-    case 'B0': return v.cB === 'b0';
-    case 'B1': return v.cB === 'b1';
-    case 'B2': return v.cB === 'b2';
-    case 'N1': return v.cN === 'n1';
-    case 'N2': return v.cN === 'n2';
-    case 'GA': return v.cA === 'a1' && v.cB === 'b0';
-    case 'GB': return v.cA === 'a1';
-    case 'H': return false;
-    case 'BG': return true;
-  }
-  throw new Error(name);
-}
 
 function pixel(png, col, row) {
   const i = ((row * 40 + 20) * png.width + (col * 40 + 20)) * 4;
