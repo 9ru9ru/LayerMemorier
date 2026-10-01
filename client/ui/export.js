@@ -27,6 +27,22 @@ LMUI.export = (() => {
     return JSON.stringify(w);
   }
 
+  // 호스트 오류 코드(export spec §5) → 사용자에게 보일 글.
+  const HOST_ERRORS = {
+    LM_EMPTY: '내용이 없어 잘라낼 수 없습니다',
+    LM_PNG8_TOO_LARGE: 'PNG-8은 가로·세로 8192px 이하 문서만 내보낼 수 있습니다',
+    LM_NAME_EXHAUSTED: '같은 이름의 파일이 너무 많습니다 (9999개)',
+  };
+
+  function hostMessage(e) {
+    const m = /LM_[A-Z0-9_]+/.exec(e.message);
+    return m && HOST_ERRORS[m[0]] ? HOST_ERRORS[m[0]] : e.message;
+  }
+
+  function phaseText(p) {
+    return (p.phase === 'measure' ? '영역 재는 중 ' : '내보내기 ') + p.done + ' / ' + p.total;
+  }
+
   function settings(d) {
     return `
       <div class="row"><label>출력명 <input data-field="baseName" value="${esc(d.baseName)}"></label>
@@ -65,13 +81,13 @@ LMUI.export = (() => {
     const canRun = !LMState.exporting && pv.jobs.length > 0 && pv.conflicts.length === 0 && d.destination.trim() !== '' && d.baseName.trim() !== '';
     let progress = '';
     if (LMState.progress) {
-      const { done, total, current } = LMState.progress;
-      progress = `<div class="progress"><div style="width:${total ? Math.round(done / total * 100) : 0}%"></div></div><div class="row"><span>${done} / ${total}</span><span>${esc(current || '')}</span></div>`;
+      const p = LMState.progress;
+      progress = `<div class="progress"><div style="width:${p.total ? Math.round(p.done / p.total * 100) : 0}%"></div></div><div class="row"><span>${esc(phaseText(p))}</span><span>${esc(p.current || '')}</span></div>`;
     }
     let summary = '';
     if (LMState.summary && !LMState.exporting) {
       const s = LMState.summary;
-      summary = `<div class="summary"><b>${s.succeeded}개 성공</b>${s.failures.length ? `, ${s.failures.length}개 실패<ul class="err">${s.failures.map(f => `<li>${esc(f.path)}: ${esc(f.error)}</li>`).join('')}</ul>` : ''}${s.aborted ? ' (중단됨)' : ''}</div>`;
+      summary = `<div class="summary"><b>${s.succeeded}개 성공</b>${s.renamed ? `, 번호를 붙여 저장 ${s.renamed}개` : ''}${s.failures.length ? `, ${s.failures.length}개 실패<ul class="err">${s.failures.map(f => `<li>${esc(f.path)}: ${esc(f.error)}</li>`).join('')}</ul>` : ''}${s.aborted ? ' (중단됨)' : ''}</div>`;
     }
     return `<div class="row">
       <button class="primary" data-action="export-run" ${canRun ? '' : 'disabled'}>내보내기</button>
@@ -90,42 +106,76 @@ LMUI.export = (() => {
     if (pv.conflicts.length || !pv.jobs.length) return;
     const dest = d.destination.trim().replace(/\\/g, '/').replace(/\/+$/, '');
     // spec §9: 출력 폴더는 시작 전에 한 번 만들어 보고 쓸 수 있는지 확인한다.
-    // 여기서 걸러야 잘못된 경로가 배리에이션 수만큼 같은 오류를 내지 않는다.
     try {
       await LMHost.call('ensureDestination', { path: dest });
     } catch (e) {
       return LMApp.status('출력 폴더를 쓸 수 없습니다: ' + e.message);
     }
+    const output = LMCore.output.normalize(d.output);
+    const fast = LMCore.output.isFastPath(output);
     LMState.exporting = true; LMState.abort = false; LMState.summary = null;
-    LMState.progress = { done: 0, total: pv.jobs.length, current: '' };
     const failures = [];
     let done = 0;
     let succeeded = 0;
+    let renamed = 0;
     LMApp.render();
     try {
       await LMApp.saveDocData();
       await LMHost.call('exportBegin', { layerIds: LMCore.combos.managedLayerIds(d.combos, LMState.layers) });
-      for (const job of pv.jobs) {
-        if (LMState.abort) break;
-        LMState.progress.current = job.relativePath;
+      let crop = null;
+      let skip = false;
+      // export spec §7 3단계: 공통 영역은 모든 조합을 먼저 잰다.
+      if (output.trim === 'combined') {
+        LMState.progress = { phase: 'measure', done: 0, total: pv.jobs.length, current: '' };
+        LMApp.render(); // 진행 막대를 그린다 (renderProgressOnly는 이미 있는 막대만 고친다)
         renderProgressOnly();
+        const measured = [];
         try {
-          await LMHost.call('exportOne', { on: job.on, off: job.off, path: dest + '/' + job.relativePath });
-          succeeded++;
+          for (const job of pv.jobs) {
+            if (LMState.abort) break;
+            LMState.progress.current = job.relativePath;
+            renderProgressOnly();
+            const r = await LMHost.call('measureBounds', { on: job.on, off: job.off });
+            measured.push(r.bounds);
+            LMState.progress.done++;
+            renderProgressOnly();
+          }
+          crop = LMCore.output.unionBounds(measured);
+          if (!LMState.abort && !crop) { failures.push({ path: '(전체)', error: '모든 조합이 비어 있습니다' }); skip = true; }
         } catch (e) {
-          failures.push({ path: job.relativePath, error: e.message });
+          failures.push({ path: '(영역 재기)', error: hostMessage(e) });
+          skip = true;
         }
-        done++;
-        LMState.progress.done = done;
+      }
+      if (!skip && !LMState.abort) {
+        LMState.progress = { phase: 'export', done: 0, total: pv.jobs.length, current: '' };
+        LMApp.render();
         renderProgressOnly();
+        for (const job of pv.jobs) {
+          if (LMState.abort) break;
+          LMState.progress.current = job.relativePath;
+          renderProgressOnly();
+          const path = dest + '/' + job.relativePath;
+          try {
+            const r = await LMHost.call('exportOne', { on: job.on, off: job.off, path, output, fast, crop });
+            succeeded++;
+            if (r && r.path && r.path.toLowerCase() !== path.toLowerCase()) renamed++;
+          } catch (e) {
+            failures.push({ path: job.relativePath, error: hostMessage(e) });
+          }
+          done++;
+          LMState.progress.done = done;
+          renderProgressOnly();
+        }
       }
     } catch (e) {
-      failures.push({ path: '(시작)', error: e.message });
+      failures.push({ path: '(시작)', error: hostMessage(e) });
     } finally {
       try { await LMHost.call('exportEnd'); } catch (e) { failures.push({ path: '(복원)', error: e.message }); }
       LMState.exporting = false;
-      LMState.summary = { done, succeeded, failures, aborted: LMState.abort };
+      LMState.summary = { done, succeeded, renamed, failures, aborted: LMState.abort };
       LMState.progress = null;
+      try { LMExportDefaults.save(output); } catch (e) { LMApp.status(e.message); }
       try { await LMApp.refresh(); } catch (e) { LMApp.status(e.message); }
     }
   }
@@ -136,7 +186,7 @@ LMUI.export = (() => {
     const { done, total, current } = LMState.progress;
     el.firstElementChild.style.width = (total ? Math.round(done / total * 100) : 0) + '%';
     const row = el.nextElementSibling;
-    if (row) { row.children[0].textContent = `${done} / ${total}`; row.children[1].textContent = current || ''; }
+    if (row) { row.children[0].textContent = phaseText(LMState.progress); row.children[1].textContent = current || ''; }
   }
 
   // 클릭 핸들러 전체를 try/catch로 감싼다: export-run이 반환하는 run()의 reject를 포함해

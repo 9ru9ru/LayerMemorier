@@ -1,13 +1,32 @@
 'use strict';
-const test = require('node:test');
+const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const { connect } = require('../helpers/panel');
 const { psCall, psRun } = require('../helpers/ps');
 const { buildFixture, docDataFor } = require('../helpers/fixture');
+const { PNG } = require('pngjs');
+const { visibleBounds } = require('../helpers/cells');
+const { enumerate } = require('../../core/variation');
+const { unionBounds } = require('../../core/output');
 
 const PRESETS = path.join(process.env.APPDATA, 'LayerMemorier', 'presets.json');
+// 내보내기 설정을 바꾸는 테스트는 마지막 설정 파일을 쓴다. 사용자의 실제 파일이 테스트에
+// 섞이지 않도록 파일 전체가 시작할 때 비우고, 끝나면 되돌린다 (export plan Review Focus 4).
+const EXPORT_DEFAULTS = path.join(process.env.APPDATA, 'LayerMemorier', 'export-defaults.json');
+let exportDefaultsBackup = null;
+before(() => {
+  if (fs.existsSync(EXPORT_DEFAULTS)) {
+    exportDefaultsBackup = fs.readFileSync(EXPORT_DEFAULTS);
+    fs.unlinkSync(EXPORT_DEFAULTS);
+  }
+});
+after(() => {
+  if (exportDefaultsBackup) fs.writeFileSync(EXPORT_DEFAULTS, exportDefaultsBackup);
+  else if (fs.existsSync(EXPORT_DEFAULTS)) fs.unlinkSync(EXPORT_DEFAULTS);
+});
+const clearExportDefaults = () => { if (fs.existsSync(EXPORT_DEFAULTS)) fs.unlinkSync(EXPORT_DEFAULTS); };
 
 async function freshPanel() {
   const p = await connect();
@@ -753,6 +772,111 @@ test('preview apply updates eye icons without re-reading every layer', async () 
     await p.eval(`if (window.__origLMHostCall) { LMHost.call = window.__origLMHostCall; delete window.__origLMHostCall; } true`).catch(() => {});
     await p.eval(`document.querySelector('#tab-layers input.preview-switch').click(); true`).catch(() => {});
     await settle();
+    p.close();
+  }
+});
+
+// export spec §3.3·3.4: 설정이 없는 PSD 는 마지막 설정에서 시작한다.
+test('a PSD without export settings starts from export-defaults.json, otherwise from built-in defaults', async () => {
+  try {
+    fs.mkdirSync(path.dirname(EXPORT_DEFAULTS), { recursive: true });
+    fs.writeFileSync(EXPORT_DEFAULTS, JSON.stringify({ format: 'jpg', jpg: { quality: 55 } }), 'utf8');
+    const { byName } = buildFixture();
+    psCall('writeDocData', docDataFor(byName));
+    let p = await freshPanel();
+    try {
+      assert.equal(await p.eval('LMState.docData.output.format'), 'jpg');
+      assert.equal(await p.eval('LMState.docData.output.jpg.quality'), 55);
+      assert.equal(await p.eval('LMState.docData.output.scale'), 100, 'missing keys come from the defaults');
+    } finally {
+      p.close();
+    }
+    clearExportDefaults();
+    p = await freshPanel();
+    try {
+      assert.equal(await p.eval('LMState.docData.output.format'), 'png24');
+    } finally {
+      p.close();
+    }
+  } finally {
+    clearExportDefaults();
+  }
+});
+
+// export spec §7: 공통 영역이면 모든 조합을 먼저 재고(measureBounds), 그다음 내보낸다.
+test('export run with combined trim measures every job first; all files share the union size', async () => {
+  const DEST = path.join(__dirname, '..', 'out', 'panel-combined');
+  fs.rmSync(DEST, { recursive: true, force: true });
+  const { byName } = buildFixture();
+  psCall('applyVisibility', { on: [], off: [byName.BG] });
+  const data = docDataFor(byName, DEST.replace(/\\/g, '/'));
+  data.output = { trim: 'combined' };
+  psCall('writeDocData', data);
+  const p = await freshPanel();
+  try {
+    await p.eval(`document.querySelector('#tabs [data-tab=export]').click(); true`);
+    await p.eval(`
+      window.__calls = [];
+      window.__origLMHostCall = LMHost.call;
+      window.__bars = [];
+      LMHost.call = (fn, arg) => {
+        window.__calls.push(fn);
+        if (fn === 'measureBounds' || fn === 'exportOne') window.__bars.push(!!document.querySelector('#tab-export .progress'));
+        return window.__origLMHostCall(fn, arg);
+      };
+      true`);
+    await p.eval('LMUI.export.run()');
+    const calls = (await p.eval('window.__calls')).filter(f => f === 'measureBounds' || f === 'exportOne');
+    assert.deepEqual(calls, Array(12).fill('measureBounds').concat(Array(12).fill('exportOne')));
+    assert.deepEqual(await p.eval('window.__bars'), Array(24).fill(true), 'the progress bar is on screen during both phases');
+    const summary = await p.eval('LMState.summary');
+    assert.deepEqual(summary.failures, []);
+    assert.equal(summary.succeeded, 12);
+    const crop = unionBounds(enumerate(data.categories).map(v => visibleBounds(v, ['BG'])));
+    const files = [];
+    for (const dir of fs.readdirSync(DEST)) for (const f of fs.readdirSync(path.join(DEST, dir))) files.push(path.join(DEST, dir, f));
+    assert.equal(files.length, 12);
+    for (const f of files) {
+      const img = PNG.sync.read(fs.readFileSync(f));
+      assert.deepEqual([img.width, img.height], [crop.right - crop.left, crop.bottom - crop.top], f);
+    }
+    assert.equal(JSON.parse(fs.readFileSync(EXPORT_DEFAULTS, 'utf8')).trim, 'combined', 'last-used settings saved after the run');
+  } finally {
+    await p.eval(`if (window.__origLMHostCall) { LMHost.call = window.__origLMHostCall; delete window.__origLMHostCall; } true`).catch(() => {});
+    clearExportDefaults();
+    p.close();
+  }
+});
+
+// 호스트 오류 코드는 한국어로, 번호를 붙여 저장한 수는 요약에.
+test('export run reports host error codes in Korean and counts renamed files', async () => {
+  const DEST = path.join(__dirname, '..', 'out', 'panel-renamed');
+  fs.rmSync(DEST, { recursive: true, force: true });
+  const { byName } = buildFixture();
+  const data = docDataFor(byName, DEST.replace(/\\/g, '/'));
+  data.output = { overwrite: false };
+  psCall('writeDocData', data);
+  const p = await freshPanel();
+  try {
+    await p.eval(`document.querySelector('#tabs [data-tab=export]').click(); true`);
+    await p.eval('LMUI.export.run()');
+    assert.equal((await p.eval('LMState.summary')).renamed, 0);
+    await p.eval('LMUI.export.run()');
+    const second = await p.eval('LMState.summary');
+    assert.equal(second.succeeded, 12);
+    assert.equal(second.renamed, 12);
+    assert.match(await p.eval(`document.querySelector('#tab-export .summary').textContent`), /번호를 붙여 저장 12개/);
+    // 모든 레이어를 끄고 조합마다 각자 잘라내기 → 조합마다 "내용이 없어" 실패.
+    // 가시성을 먼저 바꾸고 패널 새로고침(XMP 다시 읽기)이 끝난 뒤에 메모리 설정을 바꾼다.
+    psCall('applyVisibility', { on: [], off: psCall('getLayers').map(l => l.id) });
+    await new Promise(r => setTimeout(r, 1000));
+    await p.eval(`LMState.docData.output = LMCore.output.normalize({ trim: 'each' }); LMState.docData.combos = []; LMApp.render(); true`);
+    await p.eval('LMUI.export.run()');
+    const third = await p.eval('LMState.summary');
+    assert.equal(third.failures.length, 12);
+    assert.equal(third.failures[0].error, '내용이 없어 잘라낼 수 없습니다');
+  } finally {
+    clearExportDefaults();
     p.close();
   }
 });

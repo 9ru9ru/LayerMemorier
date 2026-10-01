@@ -80,6 +80,8 @@ const LMApp = {
         } else {
           docData = stored || this.newDocData(info.name.replace(/\.[^.]+$/, ''));
         }
+        // export spec §3.3: 내보내기 설정이 없는 PSD는 마지막에 쓴 설정에서 시작한다.
+        docData.output = LMCore.output.normalize(docData.output || LMExportDefaults.load());
       }
 
       const fresh = key !== LMState.docKey;
