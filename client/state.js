@@ -93,6 +93,8 @@ const LMApp = {
           LMState.docData = stored || this.newDocData(info.name.replace(/\.[^.]+$/, ''));
         }
       }
+      // 조합 선택(미리보기 기억에서 되돌린 것 포함)에 지금 없는 카테고리·값 키가 남지 않게 한다.
+      if (LMState.docData) LMState.combo = LMCore.combos.cleanWhen(LMState.combo, LMState.docData.categories);
       this.status(notice);
     } catch (e) {
       this.status(e.message);

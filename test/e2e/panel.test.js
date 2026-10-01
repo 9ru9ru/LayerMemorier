@@ -644,3 +644,37 @@ test('layer tab: Photoshop preview applies the combo, follows changes, restores 
     p.close();
   }
 });
+
+// 리뷰 #1: 미리보기가 기억한 조합에 지운 카테고리 키가 남아 있으면, 문서를 오갈 때 되살아나
+// 체크 한 번으로 어떤 배리에이션과도 맞지 않는 항목(=그 레이어가 항상 꺼짐)이 생긴다.
+test('layer tab: deleted category keys do not come back via the preview memory', async () => {
+  const { byName } = buildFixture();
+  psCall('writeDocData', docDataFor(byName));
+  const p = await freshPanel();
+  try {
+    await stubDialogs(p);
+    await p.eval(`document.querySelector('#tabs [data-tab=layers]').click(); true`);
+    await p.eval(pickCombo('cA', 'a1'));
+    await p.eval(`document.querySelector('#tab-layers input.preview-switch').click(); true`);
+    await settle();
+    await p.eval(`document.querySelector('#tabs [data-tab=categories]').click(); window.__confirmResult = true; true`);
+    await p.eval(`document.querySelector('#tab-categories [data-category=cA] [data-action=cat-delete]').click(); true`);
+    await settle();
+    psRun('app.documents.add(10, 10, 72, "lm-other"); "added"');
+    await new Promise(r => setTimeout(r, 1200));
+    psRun('app.activeDocument.close(SaveOptions.DONOTSAVECHANGES); "closed"');
+    await new Promise(r => setTimeout(r, 1200));
+    assert.equal(await p.eval('LMPreview.isOn()'), true);
+    assert.deepEqual(await p.eval('LMState.combo'), {}, '지운 카테고리 키는 되살아나지 않는다');
+
+    await p.eval(`document.querySelector('#tabs [data-tab=layers]').click(); true`);
+    await p.eval(clickCb(byName.H));
+    await settle();
+    assert.equal(psCall('readDocData').combos.some(c => 'cA' in c.when), false, '낡은 항목이 생기지 않는다');
+    await p.eval(`document.querySelector('#tab-layers input.preview-switch').click(); true`);
+    await settle();
+  } finally {
+    await restoreDialogs(p).catch(() => {});
+    p.close();
+  }
+});

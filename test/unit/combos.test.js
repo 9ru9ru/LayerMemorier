@@ -221,3 +221,9 @@ test('migrate preserves on/off/untouched for every variation (seeded random mark
     }
   }
 });
+
+test('cleanWhen drops keys whose category or value no longer exists', () => {
+  const when = deepFreeze({ A: 'a1', Z: 'z0', B: 'gone', N: 'n2' });
+  assert.deepEqual(C.cleanWhen(when, cats), { A: 'a1', N: 'n2' });
+  assert.deepEqual(C.cleanWhen({}, cats), {});
+});

@@ -140,6 +140,7 @@ LMUI.layers = (() => {
       LMState.combo = JSON.parse(cb.dataset.from);
       return afterComboChange();
     }
+    LMState.combo = C().cleanWhen(LMState.combo, LMState.docData.categories);
     const id = Number(rowEl.dataset.layer);
     const selected = selectedExisting();
     const targets = selected.includes(id) ? selected : [id];

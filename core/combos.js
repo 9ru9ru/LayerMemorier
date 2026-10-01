@@ -113,6 +113,14 @@
     });
   }
 
+  // 없는 카테고리·값을 가리키는 키를 뺀 새 조합. 레이어 탭 선택이 낡은 키를 들고 있으면
+  // toggle이 어떤 배리에이션과도 맞지 않는 항목을 만들어 그 레이어가 항상 꺼진다.
+  function cleanWhen(when, categories) {
+    const out = {};
+    for (const k of Object.keys(when)) if (!isStale({ [k]: when[k] }, categories)) out[k] = when[k];
+    return out;
+  }
+
   function comboName(when, categories) {
     const parts = [];
     for (const c of categories) {
@@ -198,6 +206,6 @@
   return {
     matches, covers, sameWhen, onLayerIds, managedLayerIds, orphanLayerIds, pruneOrphans,
     toggle, removeLayers, countWithLayers, removeFor, countFor, layerState,
-    isStale, comboName, sortCombos, combosOfLayer, previewVariation, migrate,
+    isStale, cleanWhen, comboName, sortCombos, combosOfLayer, previewVariation, migrate,
   };
 });
