@@ -4,6 +4,19 @@ const assert = require('node:assert/strict');
 const { psRun, psCall } = require('../helpers/ps');
 const { buildFixture, reopenFixture, docDataFor } = require('../helpers/fixture');
 
+// 테스트는 문서를 저장하지 않고 닫는다. 테스트가 만든 것이 아닌 문서가 열려 있으면 아무것도 닫지 않고
+// 멈춰야 한다 (2026-10-02: 사용자가 열어 둔 PSB를 테스트가 닫은 사고).
+test('test helpers refuse to close documents the tests did not create', () => {
+  psRun('app.documents.add(10, 10, 72, "user-doc"); "added"');
+  try {
+    assert.throws(() => buildFixture(), /user-doc/);
+    assert.throws(() => psRun('while (app.documents.length) app.activeDocument.close(SaveOptions.DONOTSAVECHANGES); "closed"'), /user-doc/);
+    assert.ok(psCall('getOpenDocKeys').includes('user-doc'), 'the user document is still open');
+  } finally {
+    psRun('app.documents.getByName("user-doc").close(SaveOptions.DONOTSAVECHANGES); "closed"');
+  }
+});
+
 test('host loads and ping answers', () => {
   assert.equal(psRun('"ok"', { host: false }), 'ok');
   const r = psCall('ping');

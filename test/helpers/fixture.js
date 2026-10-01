@@ -1,13 +1,14 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
-const { psRun, psCall, ROOT } = require('./ps');
+const { psRun, psCall, ROOT, assertOnlyTestDocs } = require('./ps');
 
 const PSD = path.join(ROOT, 'test', 'out', 'fixture.psd');
 const TEMPLATE = path.join(ROOT, 'test', 'fixture', 'fixture-docdata.json');
 const MAKE = path.join(ROOT, 'test', 'fixture', 'make-fixture.jsx').replace(/\\/g, '/');
 
 function buildFixture() {
+  assertOnlyTestDocs(); // make-fixture.jsx 가 열린 문서를 전부 닫는다
   fs.mkdirSync(path.dirname(PSD), { recursive: true });
   const out = psRun(`var LM_FIXTURE_OUT = ${JSON.stringify(PSD.replace(/\\/g, '/'))}; $.evalFile(File(${JSON.stringify(MAKE)}))`);
   const { psdPath } = JSON.parse(out);
