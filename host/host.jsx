@@ -419,10 +419,161 @@ var LM = LM || {};
     throw new Error('LM_NAME_EXHAUSTED');
   }
 
-  // Filled in by the copy-path task (merged duplicate, trim, scale, padding, other formats).
-  function saveCopy(doc, file, o, crop) {
-    throw new Error('LM_COPY_PATH_NOT_READY');
+  function px(v) {
+    return new UnitValue(v, 'px');
   }
+
+  // Content area of the single merged layer of a duplicate; null when empty.
+  function contentBounds(d) {
+    var b = d.activeLayer.bounds;
+    var r = { left: b[0].as('px'), top: b[1].as('px'), right: b[2].as('px'), bottom: b[3].as('px') };
+    return (r.right - r.left <= 0 || r.bottom - r.top <= 0) ? null : r;
+  }
+
+  function cropTo(d, r) {
+    d.crop([px(r.left), px(r.top), px(r.right), px(r.bottom)]);
+  }
+
+  // TGA/BMP keep transparency only through an alpha channel. 2026-10-02 probe:
+  // a 32-bit TGA saved without one came out opaque white.
+  function addAlphaFromTransparency(d) {
+    var ch = d.channels.add();
+    ch.name = 'Alpha 1';
+    try {
+      if (d.activeLayer.isBackgroundLayer) {
+        d.selection.selectAll();
+      } else {
+        var ref = new ActionReference();
+        ref.putProperty(cid('Chnl'), cid('fsel'));
+        var desc = new ActionDescriptor();
+        desc.putReference(cid('null'), ref);
+        var to = new ActionReference();
+        to.putEnumerated(cid('Chnl'), cid('Chnl'), cid('Trsp'));
+        desc.putReference(cid('T   '), to);
+        executeAction(cid('setd'), desc, DialogModes.NO);
+      }
+      d.selection.store(ch);
+    } catch (e) {
+      // Nothing to select (empty layer): the new channel stays black = fully transparent.
+    }
+    try { d.selection.deselect(); } catch (e2) {}
+    d.activeChannels = d.componentChannels;
+  }
+
+  var TIFF_ENCODING = { none: 'NONE', lzw: 'TIFFLZW', zip: 'TIFFZIP', jpg: 'JPEG' };
+
+  function saveTif(d, file, o, ext) {
+    var t = new TiffSaveOptions();
+    t.imageCompression = TIFFEncoding[TIFF_ENCODING[o.compression]];
+    if (o.compression === 'jpg') t.jpegQuality = Math.round(o.quality * 12 / 100);
+    t.alphaChannels = o.alpha;
+    t.transparency = o.transparency;
+    t.embedColorProfile = o.icc;
+    t.layers = false;
+    d.saveAs(file, t, true, ext);
+  }
+
+  function saveTga(d, file, o, ext) {
+    var alpha = o.depth === 32 && o.alpha;
+    if (alpha) addAlphaFromTransparency(d);
+    var t = new TargaSaveOptions();
+    t.resolution = o.depth === 16 ? TargaBitsPerPixels.SIXTEEN : o.depth === 24 ? TargaBitsPerPixels.TWENTYFOUR : TargaBitsPerPixels.THIRTYTWO;
+    t.alphaChannels = alpha;
+    t.rleCompression = o.rle;
+    d.saveAs(file, t, true, ext);
+  }
+
+  function saveBmp(d, file, o, ext) {
+    var alpha = o.depth === 32 && o.alpha;
+    if (alpha) addAlphaFromTransparency(d);
+    var b = new BMPSaveOptions();
+    b.depth = o.depth === 16 ? BMPDepthType.SIXTEEN : o.depth === 24 ? BMPDepthType.TWENTYFOUR : BMPDepthType.THIRTYTWO;
+    b.alphaChannels = alpha;
+    // RLE exists only for 4/8-bit BMP; 32-bit + RLE failed with a "file format module"
+    // error (2026-10-02). Our depths are 16/24/32, so it is always off.
+    b.rleCompression = false;
+    b.flipRowOrder = o.flipRowOrder;
+    b.osType = OperatingSystem.WINDOWS;
+    d.saveAs(file, b, true, ext);
+  }
+
+  function savePsd(d, file, ext) {
+    var p = new PhotoshopSaveOptions();
+    p.layers = false;
+    p.alphaChannels = false;
+    d.saveAs(file, p, true, ext);
+  }
+
+  function saveByFormat(d, file, o) {
+    var ext = extensionCase(o);
+    if (o.format === 'tif') return saveTif(d, file, o.tif, ext);
+    if (o.format === 'tga') return saveTga(d, file, o.tga, ext);
+    if (o.format === 'bmp') return saveBmp(d, file, o.bmp, ext);
+    if (o.format === 'psd') return savePsd(d, file, ext);
+    return saveWeb(d, file, o);
+  }
+
+  // Runs fn(dup) on a merged duplicate of doc in pixel units, then always closes
+  // the duplicate and makes doc active again (export spec 5.1 step 4-6).
+  function withMergedDuplicate(doc, name, fn) {
+    var units = app.preferences.rulerUnits;
+    var dup = null;
+    app.preferences.rulerUnits = Units.PIXELS;
+    try {
+      dup = doc.duplicate(name, true);
+      return fn(dup);
+    } finally {
+      if (dup) {
+        try { dup.close(SaveOptions.DONOTSAVECHANGES); } catch (e) {}
+      }
+      app.activeDocument = doc;
+      app.preferences.rulerUnits = units;
+    }
+  }
+
+  function saveCopy(doc, file, o, crop) {
+    withMergedDuplicate(doc, 'lm_export_tmp', function (dup) {
+      if (crop) {
+        cropTo(dup, crop);
+      } else if (o.trim === 'each') {
+        var b = contentBounds(dup);
+        if (!b) throw new Error('LM_EMPTY');
+        cropTo(dup, b);
+      }
+      if (o.scale !== 100) {
+        dup.resizeImage(
+          px(Math.max(1, Math.round(dup.width.as('px') * o.scale / 100))),
+          px(Math.max(1, Math.round(dup.height.as('px') * o.scale / 100))),
+          undefined, ResampleMethod.BICUBICSHARPER);
+      }
+      if (o.padding > 0) {
+        dup.resizeCanvas(px(dup.width.as('px') + 2 * o.padding), px(dup.height.as('px') + 2 * o.padding), AnchorPosition.MIDDLECENTER);
+      }
+      saveByFormat(dup, file, o);
+    });
+  }
+
+  // Modal error dialogs (e.g. "the file is locked") would stop the panel and COM until
+  // someone clicks OK. With dialogs off the error is thrown and reported for that job only.
+  function withoutDialogs(fn) {
+    var saved = app.displayDialogs;
+    app.displayDialogs = DialogModes.NO;
+    try {
+      return fn();
+    } finally {
+      app.displayDialogs = saved;
+    }
+  }
+
+  // Content area of one variation (export spec 5.2); null when empty.
+  LM.measureBounds = wrap(function (a) {
+    if (!hasDoc()) throw new Error('no document');
+    var doc = app.activeDocument;
+    return withoutDialogs(function () {
+      applyVisibilityAs('LayerMemorier export', a.on, a.off);
+      return { bounds: withMergedDuplicate(doc, 'lm_measure_tmp', contentBounds) };
+    });
+  });
 
   LM.exportBegin = wrap(function (a) {
     if (!hasDoc()) throw new Error('no document');
@@ -438,14 +589,16 @@ var LM = LM || {};
     var doc = app.activeDocument;
     var o = job.output || LEGACY_OUTPUT;
     var fast = job.output ? job.fast === true : true;
-    applyVisibilityAs('LayerMemorier export', job.on, job.off);
-    var target = targetFile(job.path, o.overwrite);
-    ensureFolder(target.parent);
-    if (target.exists) target.remove();
-    if (fast) saveWeb(doc, target, o);
-    else saveCopy(doc, target, o, job.crop || null);
-    if (!target.exists) throw new Error('save failed, file not found: ' + target.fsName);
-    return { ok: true, path: String(target.fsName).replace(/\\/g, '/') };
+    return withoutDialogs(function () {
+      applyVisibilityAs('LayerMemorier export', job.on, job.off);
+      var target = targetFile(job.path, o.overwrite);
+      ensureFolder(target.parent);
+      if (target.exists) target.remove();
+      if (fast) saveWeb(doc, target, o);
+      else saveCopy(doc, target, o, job.crop || null);
+      if (!target.exists) throw new Error('save failed, file not found: ' + target.fsName);
+      return { ok: true, path: String(target.fsName).replace(/\\/g, '/') };
+    });
   });
 
   LM.exportEnd = wrap(function () {

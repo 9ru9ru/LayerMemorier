@@ -148,3 +148,146 @@ test('fast path keeps Korean and spaces in file names (PNG-24, PNG-8, JPG)', () 
     assert.ok(res[i].path.endsWith('/' + n), res[i].path);
   });
 });
+
+// TGA(무압축 2) 픽셀: [B, G, R(, A)]. 머리 17번째 바이트 0x20 비트가 위→아래 순서.
+function tgaPixel(buf, x, y) {
+  const w = buf.readUInt16LE(12), h = buf.readUInt16LE(14), bpp = buf[16] / 8;
+  const top = (buf[17] & 0x20) !== 0;
+  const i = 18 + buf[0] + ((top ? y : h - 1 - y) * w + x) * bpp;
+  return [...buf.subarray(i, i + bpp)];
+}
+
+// BMP 픽셀: [B, G, R(, A)]. 높이가 양수면 아래→위 순서, 행은 4바이트 정렬.
+function bmpPixel(buf, x, y) {
+  const off = buf.readUInt32LE(10), w = buf.readInt32LE(18), h = buf.readInt32LE(22), bpp = buf.readUInt16LE(28) / 8;
+  const stride = Math.ceil(Math.abs(w) * bpp / 4) * 4;
+  const i = off + (h > 0 ? h - 1 - y : y) * stride + x * bpp;
+  return [...buf.subarray(i, i + bpp)];
+}
+
+test('measureBounds returns the visible area, null when nothing is visible', () => {
+  const ctx = setup({ hideBg: true });
+  const v = V(ctx, 'a1', 'b2', 'n1');
+  const j = jobFor(ctx, v, {}, 'unused.png');
+  assert.deepEqual(psCall('measureBounds', { on: j.on, off: j.off }).bounds, visibleBounds(v, ['BG']));
+  const all = ctx.layers.map(l => l.id);
+  assert.equal(psCall('measureBounds', { on: [], off: all }).bounds, null);
+  assert.equal(Number(psRun('app.documents.length')), 1, 'no temporary document left');
+});
+
+test('copy path: trim each crops to the visible area; scale and padding resize; original untouched', () => {
+  fs.rmSync(DEST, { recursive: true, force: true });
+  const ctx = setup({ hideBg: true });
+  const v = V(ctx, 'a1', 'b2', 'n1');
+  const b = visibleBounds(v, ['BG']);
+  const before = psCall('getLayers').map(l => [l.name, l.visible]);
+  okAll(run(ctx, [
+    jobFor(ctx, v, { trim: 'each' }, 'trim.png'),
+    jobFor(ctx, v, { trim: 'each', scale: 50 }, 'trim50.png'),
+    jobFor(ctx, v, { trim: 'each', padding: 10 }, 'trimpad.png'),
+  ]));
+  const t = png('trim.png');
+  assert.deepEqual([t.width, t.height], [b.right - b.left, b.bottom - b.top]);
+  assert.deepEqual(pixel(t, 20, 20), [0, 255, 0, 255], 'top-left of the crop is the A1 cell');
+  const half = png('trim50.png');
+  assert.deepEqual([half.width, half.height], [(b.right - b.left) / 2, (b.bottom - b.top) / 2]);
+  const pad = png('trimpad.png');
+  assert.deepEqual([pad.width, pad.height], [b.right - b.left + 20, b.bottom - b.top + 20]);
+  assert.equal(pixel(pad, 0, 0)[3], 0, 'padding is transparent');
+  assert.deepEqual(pixel(pad, 30, 30), [0, 255, 0, 255], 'content shifted by the padding');
+  assert.equal(Number(psRun('app.documents.length')), 1);
+  assert.equal(psRun('app.activeDocument.name'), 'fixture.psd');
+  assert.deepEqual(psCall('getLayers').map(l => [l.name, l.visible]), before, 'visibility restored');
+});
+
+test('copy path: combined crop gives every file the union size', () => {
+  const ctx = setup({ hideBg: true });
+  const vs = [V(ctx, 'a1', 'b2', 'n1'), V(ctx, 'a0', 'b0', 'n2')];
+  const jobs = vs.map((v, i) => jobFor(ctx, v, { trim: 'combined' }, `comb${i}.png`));
+  const crop = unionBounds(jobs.map(j => psCall('measureBounds', { on: j.on, off: j.off }).bounds));
+  assert.deepEqual(crop, unionBounds(vs.map(v => visibleBounds(v, ['BG']))));
+  okAll(run(ctx, jobs.map(j => Object.assign({}, j, { crop }))));
+  for (const name of ['comb0.png', 'comb1.png']) {
+    const img = png(name);
+    assert.deepEqual([img.width, img.height], [crop.right - crop.left, crop.bottom - crop.top], name);
+  }
+});
+
+test('copy path formats: TIFF, TGA, BMP, PSD; 32-bit TGA/BMP keep transparency in alpha', () => {
+  const ctx = setup({ hideBg: true });
+  const v = V(ctx, 'a0', 'b0', 'n1');
+  okAll(run(ctx, [
+    jobFor(ctx, v, { format: 'tif' }, 'f.tif'),
+    jobFor(ctx, v, { format: 'tga', tga: { rle: false } }, 'f.tga'),
+    jobFor(ctx, v, { format: 'tga', tga: { depth: 24, rle: false } }, 'f24.tga'),
+    jobFor(ctx, v, { format: 'bmp' }, 'f.bmp'),
+    jobFor(ctx, v, { format: 'psd' }, 'f.psd'),
+    jobFor(ctx, v, { format: 'bmp', bmp: { rle: true } }, 'rle.bmp'),
+  ]));
+  assert.ok(['II*\u0000', 'MM\u0000*'].includes(head('f.tif', 4).toString('latin1')), 'TIFF header');
+  assert.equal(head('f.psd', 4).toString('latin1'), '8BPS');
+  const tga = fs.readFileSync(out('f.tga'));
+  assert.equal(tga[2], 2, 'uncompressed true-color');
+  assert.equal(tga[16], 32);
+  assert.deepEqual(tgaPixel(tga, 20, 20), [0, 0, 255, 255], 'A0 red, opaque');
+  assert.equal(tgaPixel(tga, 60, 20)[3], 0, 'empty cell transparent in alpha');
+  assert.equal(fs.readFileSync(out('f24.tga'))[16], 24);
+  const bmp = fs.readFileSync(out('f.bmp'));
+  assert.equal(bmp.toString('latin1', 0, 2), 'BM');
+  assert.equal(bmp.readUInt16LE(28), 32);
+  assert.deepEqual(bmpPixel(bmp, 20, 20), [0, 0, 255, 255]);
+  assert.equal(bmpPixel(bmp, 60, 20)[3], 0);
+});
+
+test('copy path edge cases: empty + trim fails without a file, empty without trim saves, errors leave no temp document', () => {
+  fs.rmSync(DEST, { recursive: true, force: true });
+  setup();
+  const all = psCall('getLayers').map(l => l.id);
+  const lines = ['var results = [];'];
+  const jobs = [
+    { on: [], off: all, path: DEST + '/empty-trim.png', output: normalize({ trim: 'each' }), fast: false, crop: null },
+    { on: [], off: all, path: DEST + '/empty-scale.png', output: normalize({ scale: 50 }), fast: false, crop: null },
+    // 복제본을 만든 뒤 그 안에서 실패하게 한다: 덮어쓸 파일이 읽기 전용이다. 뒤집힌 자르기 영역은
+    // 포토샵이 바로잡고, 같은 이름의 폴더는 그 안에 저장해 버려 실패하지 않는다 (2026-10-02 실측).
+    { on: [], off: [], path: DEST + '/blocked.tif', output: normalize({ format: 'tif' }), fast: false, crop: null },
+  ];
+  fs.mkdirSync(DEST, { recursive: true });
+  fs.writeFileSync(out('blocked.tif'), 'read-only placeholder');
+  fs.chmodSync(out('blocked.tif'), 0o444);
+  for (const j of jobs) lines.push(`results.push(LM.exportOne(${JSON.stringify(JSON.stringify(j))}));`);
+  lines.push('JSON.stringify({ results: results, docs: app.documents.length, active: app.activeDocument.name })');
+  let r;
+  try {
+    r = JSON.parse(psRun(lines.join('\n')));
+  } finally {
+    fs.chmodSync(out('blocked.tif'), 0o666);
+  }
+  const res = r.results.map(x => JSON.parse(x));
+  assert.match(res[0].error, /LM_EMPTY/);
+  assert.equal(fs.existsSync(out('empty-trim.png')), false);
+  assert.equal(res[1].ok, true, JSON.stringify(res[1]));
+  assert.equal(png('empty-scale.png').width, 120);
+  assert.ok(res[2].error, 'a failure inside the duplicate is reported');
+  assert.equal(fs.readFileSync(out('blocked.tif'), 'utf8'), 'read-only placeholder', 'the read-only file is untouched');
+  assert.equal(r.docs, 1, 'no temporary duplicate left behind');
+  assert.equal(r.active, 'fixture.psd');
+});
+
+test('copy path on a Background-only document: trim keeps the full canvas, TGA alpha is opaque', () => {
+  psRun('while (app.documents.length) app.activeDocument.close(SaveOptions.DONOTSAVECHANGES); app.documents.add(30, 20, 72, "lm-bg", NewDocumentMode.RGB, DocumentFill.WHITE); "ok"');
+  try {
+    const lines = ['var results = [];'];
+    for (const j of [
+      { on: [], off: [], path: DEST + '/bg-trim.png', output: normalize({ trim: 'each' }), fast: false, crop: null },
+      { on: [], off: [], path: DEST + '/bg.tga', output: normalize({ format: 'tga', tga: { rle: false } }), fast: false, crop: null },
+    ]) lines.push(`results.push(LM.exportOne(${JSON.stringify(JSON.stringify(j))}));`);
+    lines.push('JSON.stringify(results)');
+    const res = JSON.parse(psRun(lines.join('\n'))).map(x => JSON.parse(x));
+    okAll(res);
+    const img = png('bg-trim.png');
+    assert.deepEqual([img.width, img.height], [30, 20]);
+    assert.equal(tgaPixel(fs.readFileSync(out('bg.tga')), 5, 5)[3], 255);
+  } finally {
+    psRun('while (app.documents.length) app.activeDocument.close(SaveOptions.DONOTSAVECHANGES); "closed"');
+  }
+});
