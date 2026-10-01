@@ -19,9 +19,19 @@ const LMPreview = (() => {
   }
 
   // 가시성을 바꾸면 포토샵이 Shw/Hd 이벤트를 돌려보낸다. 패널 자신의 메아리이므로 무시한다.
+  // 패널이 아는 문서를 같이 보낸다. 포토샵의 활성 문서가 다르면 호스트가 거부하고(레이어 id는
+  // 문서마다 겹친다), 패널은 지금 문서로 다시 읽은 뒤 오류를 알린다.
   async function setVisibility(on, off) {
+    const doc = { name: LMState.docInfo.name, path: LMState.docInfo.path || null };
     LMApp.muteEcho();
-    try { await LMHost.call('applyVisibility', { on, off }); } finally { LMApp.muteEcho(); }
+    try {
+      await LMHost.call('applyVisibility', { doc, on, off });
+    } catch (e) {
+      await LMApp.refresh();
+      throw e;
+    } finally {
+      LMApp.muteEcho();
+    }
   }
 
   async function reloadLayers() {

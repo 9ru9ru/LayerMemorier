@@ -328,6 +328,9 @@ var LM = LM || {};
   // History name is "LayerMemorier <preview in Korean>", escaped to keep this file ASCII.
   LM.applyVisibility = wrap(function (a) {
     if (!hasDoc()) throw new Error('no document');
+    // Same guard as writeDocData: layer ids repeat across documents, so a panel
+    // that still believes another document is active must not touch this one.
+    if (a && a.doc) checkExpectedDoc(a.doc);
     var hasOn = a && a.on && a.on.length;
     var hasOff = a && a.off && a.off.length;
     if (!hasOn && !hasOff) return { ok: true };

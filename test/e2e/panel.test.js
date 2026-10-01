@@ -678,3 +678,23 @@ test('layer tab: deleted category keys do not come back via the preview memory',
     p.close();
   }
 });
+
+// 리뷰 #2: 패널 자신의 메아리(선택·가시성)를 무시하는 동안에도 문서 전환·닫기는 놓치면 안 된다.
+// 놓치면 패널은 이전 문서의 레이어 id로 계속 일한다.
+test('document switches are never swallowed as the panel echo', async () => {
+  buildFixture();
+  const p = await freshPanel();
+  try {
+    const before = await p.eval('LMState.docKey');
+    await p.eval('LMState.echoUntil = Date.now() + 10000; true');
+    psRun('app.documents.add(10, 10, 72, "lm-echo"); "added"');
+    await new Promise(r => setTimeout(r, 1200));
+    assert.equal(await p.eval('LMState.docKey'), 'lm-echo');
+    psRun('app.activeDocument.close(SaveOptions.DONOTSAVECHANGES); "closed"');
+    await new Promise(r => setTimeout(r, 1200));
+    assert.equal(await p.eval('LMState.docKey'), before);
+  } finally {
+    await p.eval('LMState.echoUntil = 0; true').catch(() => {});
+    p.close();
+  }
+});

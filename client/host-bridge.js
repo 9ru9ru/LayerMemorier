@@ -34,7 +34,19 @@ const LMHost = (() => {
     ev.data = Object.keys(ids).map(k => ids[k]).join(',');
     cs.dispatchEvent(ev);
     cs.addEventListener('com.adobe.PhotoshopJSONCallback' + cs.getExtensionID(), handler);
+    return ids;
   }
 
-  return { cs, extPath, load, call, onEvents };
+  // PhotoshopJSONCallback 의 data 는 'ver1,{"eventID": ..., "eventData": {...}}' 모양의 문자열이다.
+  function eventInfo(e) {
+    try {
+      const raw = typeof e.data === 'string' ? e.data.replace(/^ver1,/, '') : e.data;
+      const d = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      return { id: d ? d.eventID : null, data: (d && d.eventData) || {} };
+    } catch (err) {
+      return { id: null, data: {} };
+    }
+  }
+
+  return { cs, extPath, load, call, onEvents, eventInfo };
 })();

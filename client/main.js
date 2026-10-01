@@ -12,12 +12,21 @@
     await LMHost.load();
 
     let timer = null;
-    await LMHost.onEvents(() => {
+    let docChanged = false;
+    let ids = {};
+    ids = await LMHost.onEvents(ev => {
       if (LMState.exporting) return;
+      // 문서 전환·닫기·새 문서는 패널이 일으킬 수 없으므로 메아리로 보고 건너뛰지 않는다.
+      // 스크립트로 새 문서를 만들면 documentAfterActivate 없이 make(new: document)만 온다.
+      const { id, data } = LMHost.eventInfo(ev);
+      const newDoc = id === ids.make && data.new && data.new._obj === 'document';
+      if (id === ids.docActivate || id === ids.close || newDoc) docChanged = true;
       clearTimeout(timer);
       timer = setTimeout(() => {
-        // 패널이 스스로 일으킨 선택 변경의 메아리는 무시한다 (레이어 탭이 표시).
-        if (Date.now() < LMState.echoUntil) return;
+        const force = docChanged;
+        docChanged = false;
+        // 패널이 스스로 일으킨 선택·가시성 변경의 메아리는 무시한다 (LMApp.muteEcho).
+        if (!force && Date.now() < LMState.echoUntil) return;
         LMApp.refresh().catch(err => LMApp.status(err.message));
       }, 200);
     });

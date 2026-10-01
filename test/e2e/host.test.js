@@ -65,6 +65,15 @@ test('applyVisibility sets visibility as one history step', () => {
   assert.equal(states(), before + 1, 'nothing to do leaves no history step');
 });
 
+// 리뷰 #2: 미리보기는 패널이 아는 문서에만 적용돼야 한다. layerID는 문서마다 겹친다.
+test('applyVisibility refuses when the panel names a different document', () => {
+  const { byName } = buildFixture();
+  assert.throws(
+    () => psCall('applyVisibility', { doc: { name: 'other.psd', path: 'D:/nowhere/other.psd' }, on: [], off: [byName.A0] }),
+    /active document changed/);
+  assert.equal(psCall('getLayers').find(l => l.name === 'A0').visible, true, 'nothing changed');
+});
+
 test('getOpenDocKeys lists open documents by path, unsaved ones by name', () => {
   const { psdPath } = buildFixture();
   psRun('app.documents.add(10, 10, 72, "lm-untitled"); "added"');
