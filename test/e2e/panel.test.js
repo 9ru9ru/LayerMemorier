@@ -723,3 +723,36 @@ test('a save during a slow refresh never writes the previous document data into 
     p.close();
   }
 });
+
+// 리뷰 #7: 레이어가 수백 개면 getLayers 한 번이 1초를 넘는다. 미리보기 반영 때마다 다시 읽지 않고
+// 보낸 on/off 로 패널의 눈 상태를 고친다.
+test('preview apply updates eye icons without re-reading every layer', async () => {
+  const { byName } = buildFixture();
+  psCall('writeDocData', docDataFor(byName));
+  const p = await freshPanel();
+  try {
+    await p.eval(`document.querySelector('#tabs [data-tab=layers]').click(); true`);
+    await p.eval(pickCombo('cA', 'a0'));
+    await p.eval(`document.querySelector('#tab-layers input.preview-switch').click(); true`);
+    await settle();
+    await p.eval(`
+      window.__getLayers = 0;
+      window.__origLMHostCall = LMHost.call;
+      LMHost.call = (fn, arg) => { if (fn === 'getLayers') window.__getLayers++; return window.__origLMHostCall(fn, arg); };
+      true`);
+    await p.eval(pickCombo('cA', 'a1'));
+    await p.eval(pickCombo('cB', 'b2'));
+    await settle();
+    assert.equal(await p.eval('window.__getLayers'), 0, '조합을 바꿀 때 레이어 전체를 다시 읽지 않는다');
+    const ps = {};
+    for (const l of psCall('getLayers')) ps[l.id] = l.visible;
+    for (const [id, visible] of await p.eval('LMState.layers.map(l => [l.id, l.visible])')) {
+      assert.equal(visible, ps[id], 'layer ' + id + ' eye matches Photoshop');
+    }
+  } finally {
+    await p.eval(`if (window.__origLMHostCall) { LMHost.call = window.__origLMHostCall; delete window.__origLMHostCall; } true`).catch(() => {});
+    await p.eval(`document.querySelector('#tab-layers input.preview-switch').click(); true`).catch(() => {});
+    await settle();
+    p.close();
+  }
+});

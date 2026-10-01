@@ -51,8 +51,13 @@ const LMPreview = (() => {
     for (const id of managed) if (p.touched.indexOf(id) === -1) p.touched.push(id);
     // 다른 문서에 갔다 오면 조합 선택이 비워진다. 캔버스와 맞게 되돌릴 수 있도록 기억한다 (state.js refresh).
     p.combo = Object.assign({}, LMState.combo);
-    await setVisibility(managed.filter(id => onSet.has(id)), managed.filter(id => !onSet.has(id)));
-    await reloadLayers();
+    const on = managed.filter(id => onSet.has(id));
+    const off = managed.filter(id => !onSet.has(id));
+    await setVisibility(on, off);
+    // 보낸 그대로 패널의 눈 상태를 고친다. 레이어 전체를 다시 읽으면(getLayers) 수백 개일 때
+    // 클릭마다 1초가 넘게 걸린다.
+    const managedSet = new Set(managed);
+    for (const l of LMState.layers) if (managedSet.has(l.id)) l.visible = onSet.has(l.id);
   }
 
   async function enable() {
