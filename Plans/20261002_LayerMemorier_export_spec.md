@@ -4,7 +4,7 @@
 
 ## 0. 한 줄 요약
 
-내보내기 옵션을 레퍼런스(antipalindrome/Photoshop-Export-Layers-to-Files-Fast) 수준으로 넓힌다. 파일 형식 7종과 형식별 세부 옵션, 잘라내기(각자/공통 영역), 크기 %, 여백 px, 파일명 대소문자·접미사, 덮어쓰기 끔(번호 붙이기). 설정은 PSD마다 저장하고, 설정이 없는 PSD는 마지막에 쓴 설정으로 시작한다.
+내보내기 옵션을 레퍼런스(antipalindrome/Photoshop-Export-Layers-to-Files-Fast) 수준으로 넓힌다. 파일 형식 7종과 형식별 세부 옵션, 잘라내기(각자/공통 영역), 크기 %, 여백 px, 파일명 대소문자·접미사, 덮어쓰기 끔(번호 붙이기), 폴더 묶기를 내보내기 탭으로 옮기고 폴더 이름 방식(누적/값만) 추가. 설정은 PSD마다 저장하고, 설정이 없는 PSD는 마지막에 쓴 설정으로 시작한다.
 
 ## 1. 배경
 
@@ -38,6 +38,7 @@
   "letterCase": "keep",
   "suffix": "",
   "overwrite": true,
+  "folderName": "cumulative",
   "png24": { "transparency": true, "interlaced": false, "matte": "white" },
   "png8": { "reduction": "selective", "colors": 256, "dither": "diffusion", "ditherAmount": 100,
             "transparency": true, "transparencyDither": "none", "transparencyDitherAmount": 100,
@@ -63,6 +64,7 @@
 | `letterCase` | `keep` `lower` `upper` |
 | `suffix` | 문자열. 금지 문자는 파일명과 같이 `-`로 바꾼다 (기존 spec §5.3) |
 | `overwrite` | boolean |
+| `folderName` | `cumulative`(누적: 출력명부터 그 카테고리까지의 토큰, 지금 방식) `value`(그 카테고리 토큰만) |
 | `*.matte` | `none` `white` `black` `gray` `background`(포토샵 배경색) `foreground`(포토샵 전경색) |
 | `png8.reduction` | `perceptual` `selective` `adaptive` `restrictive` `blackWhite` `grayscale` `mac` `windows` |
 | `png8.colors` | 정수 2~256 |
@@ -98,6 +100,9 @@
 
 `core/naming.js`의 `relativePath(doc, variation)`을 바꾼다 (`doc.output`을 `normalize`해서 쓴다):
 
+- 폴더: `folder = true`인 카테고리마다 한 단계(기존 spec §5.4, 순서는 카테고리 순서 그대로).
+  - `folderName === 'cumulative'`: 폴더 이름 = `[출력명, 첫 카테고리부터 그 카테고리까지의 토큰…]`을 구분자로 이은 것 (지금과 같음). 예: 옷에 폴더를 켜면 `출산_기본의상_옷2/`.
+  - `folderName === 'value'`: 폴더 이름 = 그 카테고리의 토큰만. 예: `옷2/`. 토큰이 빈 문자열(라벨이 빔)이면 그 단계 폴더를 만들지 않는다.
 - 파일 이름 = `[출력명, 토큰…]`을 구분자로 이은 것 + `suffix` + `.` + `extension(format)`.
 - `letterCase`가 `lower`/`upper`면 폴더 이름과 파일 이름(확장자 포함) 전체에 `toLowerCase`/`toUpperCase`를 적용한다. 한글은 영향 없다.
 - `output`이 없거나 기본값이면 지금과 같은 결과 (골든 테스트 80개 그대로 통과).
@@ -149,6 +154,7 @@
 ```
 출력   출력명 [________] 구분자 [_] 접미사 [____] 대소문자 [그대로 ▾]
        출력 폴더 [__________________] [폴더…]  ☑ 기존 파일 덮어쓰기
+폴더   ☐ 의상  ☑ 옷  ☐ 가슴   이름 [누적 (출산_기본의상_옷2) ▾]
 형식   [PNG-24 ▾]
        ☑ 투명도  ☐ 인터레이스  매트 [흰색 ▾]        ← 고른 형식의 옵션만
 크기   잘라내기 [안 함 ▾]  크기 [100] %  여백 [0] px
@@ -160,6 +166,7 @@
 ```
 
 - 형식 옵션 렌더링은 새 파일 `client/ui/output-options.js`(`LMUI.outputOptions`)로 나눈다. `export.js`는 배치·실행만 한다.
+- **폴더로 묶기** 줄 (출력 칸 아래): 카테고리마다 체크박스(카테고리 색 점 + 이름, 저장은 지금처럼 `category.folder`) + 폴더 이름 드롭다운 `누적 (출산_기본의상_옷2)` / `값만 (옷2)` — 괄호 안 예시는 지금 문서의 첫 배리에이션으로 만든다. 카테고리 탭의 "폴더" 체크박스는 없앤다 (한 곳에서만 바꾼다).
 - 잘라내기 드롭다운 글자: `안 함` / `조합마다 각자` / `모든 조합 공통 영역`. 공통 영역에는 `title`로 "모든 파일의 크기·위치가 같아집니다. 영역을 먼저 재므로 시간이 약 2배" 설명.
 - 비활성 표시: 형식 옵션 중 의미 없는 칸은 `disabled` (PNG-8 디더 양은 확산일 때만, TIFF 품질은 JPG 압축일 때만, TGA·BMP 알파는 32비트일 때만, 매트는 PNG의 투명도가 켜져 있으면 비활성).
 - "부분 출력" → `이번만 내보낼 값 (저장 안 됨)`, "제외 조합" → `항상 뺄 조합 (PSD에 저장)`. 둘 다 `<details>`. 이번만 내보낼 값은 하나라도 끈 값이 있으면, 항상 뺄 조합은 항목이 있으면 펼친 상태로 그린다. 사용자가 펼치거나 접은 상태는 세션 동안 유지한다.
@@ -198,7 +205,7 @@
 
 - `output.normalize`: 빈 입력 → 기본값, 허용 밖 값 → 기본값, 숫자 범위 자르기·반올림, 입력 불변.
 - `output.extension`, `isFastPath`, `unionBounds`(null 섞임, 전부 null).
-- `naming.relativePath`: 접미사, 대소문자(폴더 포함), 형식별 확장자, `output` 없을 때 기존과 같음(골든 80개).
+- `naming.relativePath`: 폴더 이름 `cumulative`/`value`(빈 토큰이면 그 단계 생략), 접미사, 대소문자(폴더 포함), 형식별 확장자, `output` 없을 때 기존과 같음(골든 80개).
 
 ### 9.2 호스트 E2E (`test/e2e/export.test.js`, fixture)
 
@@ -221,6 +228,7 @@
 - `output`이 없는 PSD를 열면 `export-defaults.json`의 값으로 시작한다. 파일이 없으면 기본값.
 - 범위 밖 숫자(품질 150)를 넣으면 100으로 저장되고 칸도 100으로 다시 그려진다.
 - 미리보기 목록이 접미사·대소문자·확장자를 반영한다.
+- 폴더로 묶기: 체크와 이름 방식(누적/값만)이 미리보기 경로와 `readDocData()`에 반영된다. 카테고리 탭에는 폴더 체크박스가 없다.
 - 공통 영역으로 실행: 진행 글자가 `영역 재는 중`을 거쳐 `내보내기`가 되고, 결과 파일 크기가 모두 같다.
 - 두 `<details>`의 새 이름과 기본 펼침 규칙, 경고 접힘.
 - 스크린샷 520px·900px 폭.
@@ -247,3 +255,4 @@
 | 2026-10-02 | 공통 영역은 먼저 재고 내보냄 | 첫 파일을 자르기 전에 전체 영역을 알아야 함. 레이어 경계로 추정하면 조정 레이어·마스크 때문에 틀림 |
 | 2026-10-02 | 대소문자는 폴더 이름에도 적용 | 파일명과 폴더명이 섞이지 않게 |
 | 2026-10-02 | 덮어쓰기 기본 켬 | 지금 동작과 같음. 같은 세트를 반복해서 내보내는 사용 방식 |
+| 2026-10-02 | 폴더 묶기를 내보내기 탭으로 옮기고 폴더 이름 방식(누적/값만) 추가 | 사용자 요청 (예: `출산_기본의상_옷2`로 묶기). 폴더 순서는 원 기획대로 카테고리 순서와 같게 둔다 |
