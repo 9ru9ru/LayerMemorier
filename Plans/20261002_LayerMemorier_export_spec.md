@@ -114,7 +114,9 @@
 | 바꿈 | `LM.exportOne(json)` | `{on, off, path, output, fast, crop}` — `fast`는 패널이 `LMCore.output.isFastPath(output)`로 계산한 값, `crop`은 `{left, top, right, bottom}` 또는 null | `{ok, path}` (실제로 쓴 경로) 또는 `{error}` |
 | 추가 | `LM.measureBounds(json)` | `{on, off}` | `{bounds: {left, top, right, bottom}}` 또는 `{bounds: null}`(내용 없음) |
 
-`output`은 패널이 `normalize`한 객체다. 호스트는 다시 검증하지 않는다.
+`output`은 패널이 `normalize`한 객체다. 호스트는 다시 검증하지 않는다. `output`이 없으면(기존 호출) PNG-24 기본값 + 빠른 길로 처리한다.
+
+host.jsx는 ASCII만 쓰므로 사용자에게 보일 오류는 코드로 돌려주고 패널이 한국어로 바꾼다: `LM_EMPTY` → `내용이 없어 잘라낼 수 없습니다`, `LM_PNG8_TOO_LARGE` → `PNG-8은 가로·세로 8192px 이하 문서만 내보낼 수 있습니다`, `LM_NAME_EXHAUSTED` → `같은 이름의 파일이 너무 많습니다 (9999개)`.
 
 ### 5.1 exportOne
 
@@ -132,7 +134,7 @@
 
 ### 5.2 measureBounds
 
-가시성을 on/off로 맞춘 뒤 합친 복제본을 만들고, 그 레이어의 내용 영역(px)을 돌려준다. 내용이 없거나, 보이는 레이어가 없어 합친 복제본을 만들 수 없으면 null. 복제 길(§5.1 4-1)도 같은 경우를 `내용이 없어 잘라낼 수 없습니다`(잘라내기 있음) 또는 `보이는 내용이 없습니다`(잘라내기 없음)로 실패 처리한다. `finally`에서 복제본을 닫고 원본을 활성 문서로 만든다. 가시성 복원은 `exportEnd`가 한다 (같은 스냅샷).
+가시성을 on/off로 맞춘 뒤 합친 복제본을 만들고, 그 레이어의 내용 영역(px)을 돌려준다. 내용이 없으면(합친 레이어 영역의 너비나 높이가 0) null. 보이는 레이어가 하나도 없어도 합친 복제본은 만들어진다 (2026-10-02 실측). 복제 길에서 잘라내기 없이 내용이 없으면 빠른 길과 같이 빈 이미지로 저장한다. `finally`에서 복제본을 닫고 원본을 활성 문서로 만든다. 가시성 복원은 `exportEnd`가 한다 (같은 스냅샷).
 
 ### 5.3 형식별 저장
 
