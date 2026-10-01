@@ -3,6 +3,7 @@
 작성 2026-09-15. 원 요청은 저장소 루트 `기획.txt`.
 
 > 2026-10-01: §4.3의 `marks`·`nativeColor`, §5.2 가시성 판정, §5.5 작업 목록의 on/off 계산, §6.2 레이어 탭, §7의 `setLayerColor`는 `Plans/20261001_LayerMemorier_combos_spec.md`로 대체되었다.
+> 2026-10-02: §1 비목표의 "PNG-24 이외 형식, 트림, 리사이즈", §5.3 확장자, §6.1 폴더 체크, §6.3 내보내기 탭, §7 `exportOne`은 `Plans/20261002_LayerMemorier_export_spec.md`로 대체되었다.
 
 ## 0. 한 줄 요약
 

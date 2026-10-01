@@ -6,7 +6,7 @@ const LMState = {
   layers: [],         // LM.getLayers()
   selectedIds: [],    // 선택된 layerId
   collapsed: new Set(), // 접힌 그룹 id
-  include: {},        // 부분 출력 {categoryId: valueId[]} (세션)
+  include: {},        // 이번만 내보낼 값 {categoryId: valueId[]} (세션)
   combo: {},          // 레이어 탭에서 고른 조합 {categoryId: valueId} (세션)
   anchorId: null,     // Shift 범위 선택의 시작 행 id
   previews: {},       // 포토샵 미리보기 {docKey: {snapshot: {layerId: visible}, touched: [layerId], combo: 반영한 조합}} (세션)
@@ -87,7 +87,7 @@ const LMApp = {
 
       const fresh = key !== LMState.docKey;
       if (fresh) {
-        // 문서가 바뀌었다. 부분 출력·조합 선택은 세션 값이라 저장되지 않으므로, 프리셋을
+        // 문서가 바뀌었다. 이번만 내보낼 값·조합 선택은 세션 값이라 저장되지 않으므로, 프리셋을
         // 공유하는 다른 PSD에 같은 카테고리 id로 그대로 걸리지 않게 여기서 비운다.
         LMState.include = {};
         LMState.combo = {};
