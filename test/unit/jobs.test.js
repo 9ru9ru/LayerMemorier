@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildJobs, orphanMarkIds, markedLayerIds } = require('../../core/jobs');
+const { buildJobs } = require('../../core/jobs');
 const { enumerate } = require('../../core/variation');
 
 function cat(id, valueIds, labelFormat = '{c}{v}', folder = false) {
@@ -15,12 +15,12 @@ const layers = [
   { id: 21, name: 'A1B1', kind: 'layer', visible: true, depth: 0, parentId: null, color: 'none' },
   { id: 30, name: 'plain', kind: 'layer', visible: true, depth: 0, parentId: null, color: 'none' },
 ];
-function doc(marks, extra) {
-  return Object.assign({ baseName: 'fx', delimiter: '_', categories, marks, excluded: [] }, extra);
+function doc(combos, extra) {
+  return Object.assign({ baseName: 'fx', delimiter: '_', categories, combos, excluded: [] }, extra);
 }
 
-test('jobs contain only marked layers, split into on/off per variation', () => {
-  const d = doc({ '20': { A: ['a0'] }, '21': { A: ['a1'], B: ['b1'] } });
+test('jobs contain only managed layers, split into on/off per variation', () => {
+  const d = doc([{ when: { A: 'a0' }, layers: [20] }, { when: { A: 'a1', B: 'b1' }, layers: [21] }]);
   const { jobs, conflicts, warnings } = buildJobs(d, layers, enumerate(categories));
   assert.equal(conflicts.length, 0);
   assert.equal(warnings.length, 0);
@@ -29,47 +29,57 @@ test('jobs contain only marked layers, split into on/off per variation', () => {
   assert.deepEqual(jobs[3], { on: [21], off: [20], relativePath: 'fx_A1_B1.png' });
 });
 
+test('a layer in A0_B1 and A1_B0 only is off in A0_B0 and A1_B1', () => {
+  const d = doc([{ when: { A: 'a0', B: 'b1' }, layers: [21] }, { when: { A: 'a1', B: 'b0' }, layers: [21] }]);
+  const { jobs } = buildJobs(d, layers, enumerate(categories));
+  assert.deepEqual(jobs.map(j => j.on), [[], [21], [21], []]);
+  assert.deepEqual(jobs.map(j => j.off), [[21], [], [], [21]]);
+});
+
+test('the "all combos" entry turns its layers on everywhere', () => {
+  const d = doc([{ when: {}, layers: [30] }, { when: { B: 'b1' }, layers: [20] }]);
+  const { jobs } = buildJobs(d, layers, enumerate(categories));
+  assert.deepEqual(jobs.map(j => j.on), [[30], [20, 30], [30], [20, 30]]);
+});
+
 test('duplicate relative paths are reported as conflicts', () => {
   const cats = [cat('A', ['a0', 'a1'])];
   cats[0].values[1].label = '0';
-  const d = { baseName: 'fx', delimiter: '_', categories: cats, marks: {}, excluded: [] };
+  const d = { baseName: 'fx', delimiter: '_', categories: cats, combos: [], excluded: [] };
   const { jobs, conflicts } = buildJobs(d, layers, enumerate(cats));
   assert.equal(jobs.length, 2);
   assert.deepEqual(conflicts, ['fx_A0.png']);
 });
 
-test('orphan marks (layer id not in document) produce warnings and are skipped', () => {
-  const d = doc({ '999': { A: ['a0'] }, '20': { A: ['a0'] } });
+test('orphan layers (not in document) produce warnings and are skipped', () => {
+  const d = doc([{ when: { A: 'a0' }, layers: [999, 20] }]);
   const { jobs, warnings } = buildJobs(d, layers, enumerate(categories));
   assert.deepEqual(warnings, [{ type: 'orphan', layerId: 999 }]);
   assert.deepEqual(jobs[0].on, [20]);
-  assert.deepEqual(orphanMarkIds(d.marks, layers), [999]);
+  assert.deepEqual(jobs[2].off, [20]);
 });
 
-test('stale category/value references produce warnings', () => {
-  const d = doc({ '20': { Z: ['z0'], A: ['a0', 'gone'] } });
-  const { warnings } = buildJobs(d, layers, enumerate(categories));
+test('combos referring to missing categories/values warn stale and never match', () => {
+  const d = doc([{ when: { Z: 'z0' }, layers: [20] }, { when: { A: 'gone' }, layers: [21] }]);
+  const { jobs, warnings } = buildJobs(d, layers, enumerate(categories));
   assert.deepEqual(warnings, [
-    { type: 'stale', layerId: 20, detail: { categoryId: 'Z', valueId: null } },
-    { type: 'stale', layerId: 20, detail: { categoryId: 'A', valueId: 'gone' } },
+    { type: 'stale', detail: { when: { Z: 'z0' } } },
+    { type: 'stale', detail: { when: { A: 'gone' } } },
   ]);
+  for (const j of jobs) { assert.deepEqual(j.on, []); assert.deepEqual(j.off, [20, 21]); }
 });
 
-test('marked layer under an unmarked hidden group warns parentHidden', () => {
-  const d = doc({ '11': { A: ['a0'] } });
+test('managed layer under an unmanaged hidden group warns parentHidden', () => {
+  const d = doc([{ when: { A: 'a0' }, layers: [11] }]);
   const { warnings } = buildJobs(d, layers, enumerate(categories));
   assert.deepEqual(warnings, [{ type: 'parentHidden', layerId: 11, detail: { groupId: 10 } }]);
 });
 
-test('marked hidden group does not warn for children', () => {
-  const d = doc({ '10': { A: ['a1'] }, '11': { B: ['b0'] } });
+test('managed hidden group does not warn for children', () => {
+  const d = doc([{ when: { A: 'a1' }, layers: [10] }, { when: { B: 'b0' }, layers: [11] }]);
   const { warnings, jobs } = buildJobs(d, layers, enumerate(categories));
   assert.equal(warnings.length, 0);
-  // {A:a0,B:b0}: G(A=a1) 꺼짐, inG(B=b0) 켜짐 — 부모가 꺼져 있어도 판정은 각자 한다 (포토샵이 자식을 가린다)
+  // {A:a0,B:b0}: G(A1) 꺼짐, inG(B0) 켜짐 — 부모가 꺼져 있어도 판정은 각자 한다 (포토샵이 자식을 가린다)
   assert.deepEqual(jobs[0], { on: [11], off: [10], relativePath: 'fx_A0_B0.png' });
   assert.deepEqual(jobs[2], { on: [10, 11], off: [], relativePath: 'fx_A1_B0.png' });
-});
-
-test('markedLayerIds returns existing marked ids as numbers', () => {
-  assert.deepEqual(markedLayerIds({ '20': { A: ['a0'] }, '999': { A: ['a0'] }, '11': {} }, layers), [11, 20]);
 });

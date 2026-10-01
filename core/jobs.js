@@ -1,72 +1,48 @@
-// spec §5.5 내보내기 작업 목록 + §9 경고.
+// combos spec §5.7 내보내기 작업 목록 + 경고.
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
-    module.exports = factory(require('./visibility'), require('./naming'));
+    module.exports = factory(require('./combos'), require('./naming'));
   } else {
     root.LMCore = root.LMCore || {};
-    root.LMCore.jobs = factory(root.LMCore.visibility, root.LMCore.naming);
+    root.LMCore.jobs = factory(root.LMCore.combos, root.LMCore.naming);
   }
-})(typeof self !== 'undefined' ? self : this, function (visibility, naming) {
+})(typeof self !== 'undefined' ? self : this, function (combosLib, naming) {
   'use strict';
 
-  function layerMap(layers) {
-    const map = new Map();
-    for (const l of layers) map.set(String(l.id), l);
-    return map;
-  }
-
-  function markedLayerIds(marks, layers) {
-    const existing = layerMap(layers);
-    return Object.keys(marks || {}).filter(id => existing.has(id)).map(Number).sort((a, b) => a - b);
-  }
-
-  function orphanMarkIds(marks, layers) {
-    const existing = layerMap(layers);
-    return Object.keys(marks || {}).filter(id => !existing.has(id)).map(Number).sort((a, b) => a - b);
-  }
-
-  // 마크 없는 조상 그룹 중 꺼진 것이 있으면 그 그룹 id, 없으면 null.
-  function hiddenUnmarkedAncestor(layer, byId, marks) {
+  // 관리 레이어가 아닌 조상 그룹 중 꺼진 것이 있으면 그 그룹 id, 없으면 null.
+  function hiddenUnmanagedAncestor(layer, byId, managed) {
     let parentId = layer.parentId;
     while (parentId != null) {
-      const parent = byId.get(String(parentId));
+      const parent = byId.get(parentId);
       if (!parent) return null;
-      const parentMarked = marks[String(parent.id)] && Object.keys(marks[String(parent.id)]).length > 0;
-      if (!parentMarked && !parent.visible) return parent.id;
+      if (!managed.has(parent.id) && !parent.visible) return parent.id;
       parentId = parent.parentId;
     }
     return null;
   }
 
   function buildJobs(docData, layers, variations) {
-    const marks = docData.marks || {};
-    const byId = layerMap(layers);
+    const combos = docData.combos || [];
+    const byId = new Map(layers.map(l => [l.id, l]));
+    const managedIds = combosLib.managedLayerIds(combos, layers);
+    const managed = new Set(managedIds);
     const warnings = [];
-    const marked = [];
 
-    for (const key of Object.keys(marks)) {
-      const layer = byId.get(key);
-      if (!layer) { warnings.push({ type: 'orphan', layerId: Number(key) }); continue; }
-      const mark = marks[key];
-      if (!mark || Object.keys(mark).length === 0) continue;
-      for (const issue of visibility.markIssues(mark, docData.categories)) {
-        warnings.push({ type: 'stale', layerId: layer.id, detail: issue });
-      }
-      const hiddenGroup = hiddenUnmarkedAncestor(layer, byId, marks);
-      if (hiddenGroup != null) warnings.push({ type: 'parentHidden', layerId: layer.id, detail: { groupId: hiddenGroup } });
-      marked.push({ layer, mark });
+    for (const id of combosLib.orphanLayerIds(combos, layers)) warnings.push({ type: 'orphan', layerId: id });
+    for (const c of combos) {
+      if (combosLib.isStale(c.when, docData.categories)) warnings.push({ type: 'stale', detail: { when: c.when } });
     }
-    marked.sort((a, b) => a.layer.id - b.layer.id);
+    for (const id of managedIds) {
+      const groupId = hiddenUnmanagedAncestor(byId.get(id), byId, managed);
+      if (groupId != null) warnings.push({ type: 'parentHidden', layerId: id, detail: { groupId } });
+    }
 
     const seen = new Map();
     const conflicts = [];
     const jobs = variations.map(variation => {
-      const on = [], off = [];
-      for (const { layer, mark } of marked) {
-        const v = visibility.judge(mark, variation, docData.categories);
-        if (v === true) on.push(layer.id);
-        else if (v === false) off.push(layer.id);
-      }
+      const onSet = new Set(combosLib.onLayerIds(combos, variation));
+      const on = managedIds.filter(id => onSet.has(id));
+      const off = managedIds.filter(id => !onSet.has(id));
       const relativePath = naming.relativePath(docData, variation);
       const count = (seen.get(relativePath) || 0) + 1;
       seen.set(relativePath, count);
@@ -77,5 +53,5 @@
     return { jobs, conflicts, warnings };
   }
 
-  return { buildJobs, orphanMarkIds, markedLayerIds };
+  return { buildJobs };
 });
