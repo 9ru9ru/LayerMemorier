@@ -37,13 +37,25 @@ input[type=checkbox] { width: auto; }
 .layer-row .eye { width: 14px; color: #888; }
 .layer-row .eye.on { color: #ddd; }
 .layer-row .caret { width: 12px; color: #999; }
-.layer-row .name { flex: 0 0 auto; }
 .layer-row.group .name { font-weight: 600; }
-.badge { display: inline-block; padding: 0 5px; border-radius: 8px; font-size: 10px; color: #111; line-height: 15px; }
-.badge.stale { text-decoration: line-through; opacity: .6; }
-.mark-panel { border-top: 1px solid #444; margin-top: 8px; padding-top: 8px; }
-.mark-panel .cat-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 3px 0; }
-.mark-panel label { display: inline-flex; align-items: center; gap: 3px; }
+.layer-row .name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.layer-row .combos { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: #888; font-size: 11px; text-align: right; }
+.layer-row .cb { flex: 0 0 auto; width: 13px; height: 13px; border: 1px solid #888; border-radius: 2px; position: relative; }
+.layer-row .cb:hover { border-color: #ccc; }
+.layer-row .cb.checked { background: #4a90e2; border-color: #4a90e2; }
+.layer-row .cb.checked::after { content: ''; position: absolute; left: 3px; top: 0; width: 4px; height: 8px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.layer-row .cb.inherited { border-style: dashed; border-color: #4a90e2; background: rgba(74, 144, 226, .2); }
+.layer-row .cb.inherited::after { content: ''; position: absolute; left: 3px; top: 0; width: 4px; height: 8px; border: solid #7fb0ea; border-width: 0 2px 2px 0; transform: rotate(45deg); opacity: .7; }
+/* 고정 영역 + 트리만 스크롤 (combos spec §6.2) */
+main.fill { overflow: hidden; display: flex; flex-direction: column; }
+main.fill > .tab.active { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.combo-bar { flex: 0 0 auto; border-bottom: 1px solid #444; padding-bottom: 4px; margin-bottom: 4px; }
+.combo-bar .pick { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; margin-right: 6px; }
+/* select는 본문 글꼴을 물려받지 않고 Arial로 그려지는데, Arial의 밑줄(_)은 아래 가장자리에서
+   잘려 A0_B2가 "A0 B2"로 보인다. 본문 글꼴을 쓰게 한다. */
+.combo-bar select { font: inherit; }
+.combo-bar .notice { font-size: 11px; }
+.tree { flex: 1; min-height: 0; overflow: auto; }
 /* 내보내기 탭 */
 .preview { max-height: 180px; overflow: auto; background: #1f1f1f; border: 1px solid #444; padding: 4px; font-family: Consolas, monospace; font-size: 11px; white-space: pre; }
 .progress { height: 8px; background: #1f1f1f; border-radius: 4px; overflow: hidden; }

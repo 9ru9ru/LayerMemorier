@@ -105,6 +105,8 @@ const LMApp = {
     document.getElementById('doc-name').textContent = LMState.docInfo ? LMState.docInfo.name : '문서 없음';
     document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === LMState.tab));
     document.querySelectorAll('main .tab').forEach(s => s.classList.toggle('active', s.id === 'tab-' + LMState.tab));
+    // 레이어 탭은 고정 영역 + 트리만 스크롤 (combos spec §6.2). main 자체는 스크롤하지 않는다.
+    main.classList.toggle('fill', LMState.tab === 'layers' && !!LMState.docData);
     const el = document.getElementById('tab-' + LMState.tab);
     if (!LMState.docInfo || !LMState.docData) el.innerHTML = '<p class="hint">포토샵에서 문서를 열면 여기에 표시됩니다.</p>';
     else LMUI[LMState.tab].render(el);

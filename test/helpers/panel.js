@@ -56,6 +56,11 @@ async function connect(port = 8092) {
       await client.Page.reload();
       await new Promise(r => setTimeout(r, waitMs));
     },
+    // 패널 창 크기를 흉내 낸다 (CEP 창 자체는 자동화로 바꿀 수 없다). null이면 원래대로.
+    async emulate(width, height) {
+      if (width == null) return client.Emulation.clearDeviceMetricsOverride();
+      return client.Emulation.setDeviceMetricsOverride({ width, height, deviceScaleFactor: 1, mobile: false });
+    },
     close: () => client.close(),
   };
 }

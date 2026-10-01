@@ -1,6 +1,7 @@
-// 레이어 탭 (spec §6.2): 트리 + 배지 + 선택 동기화 + 마킹 영역.
+// 레이어 탭 (combos spec §6.2): 고정 조합 선택 영역 + 따로 스크롤되는 트리.
 LMUI.layers = (() => {
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const C = () => LMCore.combos;
 
   function visibleRows() {
     const rows = [];
@@ -13,149 +14,192 @@ LMUI.layers = (() => {
     return rows;
   }
 
-  function badges(layer) {
-    const mark = LMState.docData.marks[String(layer.id)];
-    if (!mark) return '';
-    const cats = LMState.docData.categories;
-    const issues = LMCore.visibility.markIssues(mark, cats);
-    return Object.keys(mark).map(cid => {
-      const c = cats.find(c => c.id === cid);
-      if (!c) return `<span class="badge stale" style="background:${LMColors.hex('gray')}">${esc(cid)}</span>`;
-      const names = mark[cid].map(vid => { const v = c.values.find(v => v.id === vid); return v ? esc(v.name) : `<s>${esc(vid)}</s>`; }).join(',');
-      const stale = issues.some(i => i.categoryId === cid) ? ' stale' : '';
-      return `<span class="badge${stale}" style="background:${LMColors.hex(c.color)}">${esc(c.name)}: ${names}</span>`;
-    }).join(' ');
+  function selectedExisting() {
+    return LMState.selectedIds.filter(id => LMState.layers.some(l => l.id === id));
   }
 
-  function row(l) {
+  // ---- 고정 영역 ----
+
+  function pickerBar(cats) {
+    const selects = cats.map(c => {
+      const cur = LMState.combo[c.id] || '';
+      const opts = [`<option value="" ${cur === '' ? 'selected' : ''}>전체</option>`]
+        .concat(c.values.map(v => `<option value="${esc(v.id)}" ${cur === v.id ? 'selected' : ''}>${esc(v.name)}</option>`)).join('');
+      return `<label class="pick"><span class="dot" style="background:${LMColors.hex(c.color)}"></span>${esc(c.name)} <select data-combo-cat="${esc(c.id)}">${opts}</select></label>`;
+    }).join('');
+    return `<div class="row picker"><b>조합</b>${selects}</div>`;
+  }
+
+  function madeBar(cats, sorted, existing) {
+    const current = sorted.find(e => C().sameWhen(e.when, LMState.combo));
+    const opts = (current ? [] : ['<option value="" selected>(새 조합)</option>']).concat(sorted.map(e => {
+      const n = e.layers.filter(id => existing.has(id)).length;
+      return `<option value="${esc(JSON.stringify(e.when))}" ${e === current ? 'selected' : ''}>${esc(C().comboName(e.when, cats))} · ${n}개</option>`;
+    })).join('');
+    return `<div class="row made"><label>만든 조합 <select class="made-select">${opts}</select></label></div>`;
+  }
+
+  function selectionBar() {
+    const ids = selectedExisting();
+    if (!ids.length) return '';
+    const m = C().countWithLayers(LMState.docData.combos, ids);
+    return `<div class="row selbar"><b>선택 ${ids.length}개</b><button data-action="remove-selected" ${m ? '' : 'disabled'}>선택 레이어를 모든 조합에서 빼기</button></div>`;
+  }
+
+  function noticeBar() {
+    const orphans = C().orphanLayerIds(LMState.docData.combos, LMState.layers);
+    const orphan = orphans.length
+      ? `<span class="warn orphans">문서에 없는 레이어 ${orphans.length}개가 조합에 남아 있습니다 <button data-action="orphans-clean">정리</button></span>`
+      : '';
+    return `<div class="row notice">${orphan}<span class="hint">PSD를 저장해야 조합이 파일에 남습니다.</span></div>`;
+  }
+
+  // ---- 트리 ----
+
+  function checkbox(l, cats) {
+    const s = C().layerState(LMState.docData.combos, LMState.combo, l.id);
+    if (s.state === 'inherited') {
+      const name = C().comboName(s.from, cats);
+      return `<span class="cb inherited" data-from="${esc(JSON.stringify(s.from))}" title="${esc(name)}에서 켜짐 (클릭하면 이동)"></span>`;
+    }
+    return `<span class="cb ${s.state}" title="${s.state === 'checked' ? '이 조합에서 켜짐 (클릭하면 빼기)' : '이 조합에 넣기'}"></span>`;
+  }
+
+  function row(l, cats, namesByLayer) {
     const selected = LMState.selectedIds.includes(l.id) ? ' selected' : '';
     const caret = l.kind === 'group' ? `<span class="caret">${LMState.collapsed.has(l.id) ? '▸' : '▾'}</span>` : '<span class="caret"></span>';
+    const names = namesByLayer.get(l.id);
+    const list = names ? `<span class="combos" title="${esc(names.join(', '))}">${esc(names.join(', '))}</span>` : '';
     return `<div class="layer-row ${l.kind}${selected}" data-layer="${l.id}" style="padding-left:${4 + l.depth * 14}px">
-      ${caret}<span class="eye${l.visible ? ' on' : ''}">${l.visible ? '👁' : '·'}</span>
-      <span class="name">${esc(l.name)}</span>${badges(l)}</div>`;
-  }
-
-  function markPanel() {
-    const ids = LMState.selectedIds.filter(id => LMState.layers.some(l => l.id === id));
-    if (!ids.length) return '<p class="hint mark-panel">레이어를 선택하면 마킹할 수 있습니다.</p>';
-    const marks = ids.map(id => LMState.docData.marks[String(id)] || {});
-    const lines = LMState.docData.categories.map(c => {
-      const boxes = c.values.map(v => {
-        const count = marks.filter(m => (m[c.id] || []).includes(v.id)).length;
-        const checked = count === ids.length ? 'checked' : '';
-        const mixed = count > 0 && count < ids.length ? 'data-mixed="1"' : '';
-        return `<label><input type="checkbox" data-category="${esc(c.id)}" data-value="${esc(v.id)}" ${checked} ${mixed}>${esc(v.name)}</label>`;
-      }).join('');
-      return `<div class="cat-line"><span class="dot" style="background:${LMColors.hex(c.color)}"></span><b>${esc(c.name)}</b>${boxes}</div>`;
-    }).join('');
-    return `<div class="mark-panel"><div class="row"><b>선택 ${ids.length}개</b><button data-action="marks-clear">마크 지우기</button></div>${lines || '<p class="hint">카테고리 탭에서 카테고리를 먼저 만드세요.</p>'}</div>`;
-  }
-
-  function orphans() {
-    const ids = LMCore.jobs.orphanMarkIds(LMState.docData.marks, LMState.layers);
-    if (!ids.length) return '';
-    return `<div class="row warn orphans">고아 마크 ${ids.length}개 (문서에 없는 레이어) <button data-action="orphans-clean">정리</button></div>`;
+      ${caret}${cats.length ? checkbox(l, cats) : ''}<span class="eye${l.visible ? ' on' : ''}">${l.visible ? '👁' : '·'}</span>
+      <span class="name">${esc(l.name)}</span>${list}</div>`;
   }
 
   function render(el) {
-    el.innerHTML = `<p class="hint">PSD를 저장해야 마크가 파일에 남습니다.</p>${orphans()}<div class="tree">${visibleRows().map(row).join('')}</div>${markPanel()}`;
-    el.querySelectorAll('input[data-mixed]').forEach(i => { i.indeterminate = true; });
+    const prev = el.querySelector('.tree');
+    const keep = prev ? prev.scrollTop : 0;
+    const cats = LMState.docData.categories;
+    const sorted = C().sortCombos(LMState.docData.combos, cats);
+    const existing = new Set(LMState.layers.map(l => l.id));
+    // 행마다 조합 목록을 다시 정렬하지 않도록 한 번에 모은다 (레이어 수백 개 대비).
+    const namesByLayer = new Map();
+    for (const e of sorted) {
+      const name = C().comboName(e.when, cats);
+      for (const id of e.layers) {
+        if (!namesByLayer.has(id)) namesByLayer.set(id, []);
+        namesByLayer.get(id).push(name);
+      }
+    }
+    const bar = cats.length
+      ? pickerBar(cats) + madeBar(cats, sorted, existing) + selectionBar() + noticeBar()
+      : '<p class="hint">카테고리 탭에서 카테고리를 먼저 만드세요.</p>';
+    el.innerHTML = `<div class="combo-bar">${bar}</div><div class="tree">${visibleRows().map(l => row(l, cats, namesByLayer)).join('')}</div>`;
+    el.querySelector('.tree').scrollTop = keep;
   }
 
-  // 패널이 포토샵 선택을 바꾸면 slct 이벤트가 그대로 되돌아온다. 그 메아리로
-  // 레이어 목록을 통째로 다시 읽으면 방금 클릭한 자리에서 스크롤이 튄다.
-  // 300ms 동안은 main.js의 디바운스가 새로고침을 건너뛴다.
-  function muteEcho() { LMState.echoUntil = Date.now() + 300; }
-
-  // setLayerColor는 'Clr ' 속성을 항상 활성 레이어에 적용하므로 대상 레이어를 먼저
-  // 선택하는 부작용이 있다(env-facts.md). 루프를 도는 동안 포토샵의 선택이
-  // 마지막으로 칠한 레이어 하나로 좁혀지므로, 루프 앞뒤로 패널이 알던 선택을
-  // 직접 저장/복원해 이 함수를 호출한 곳의 다중 선택을 지켜준다.
-  async function applyNativeColor(layerIds) {
-    if (!LMState.docData.nativeColor) return;
-    let saved = [];
-    try { saved = await LMHost.call('getSelectedLayerIds'); } catch (e) { LMApp.status(e.message); }
-    for (const id of layerIds) {
-      const mark = LMState.docData.marks[String(id)];
-      const first = mark && Object.keys(mark)[0];
-      const c = first && LMState.docData.categories.find(c => c.id === first);
-      const color = c ? LMColors.native(c.color) : 'none';
-      muteEcho();
-      try { await LMHost.call('setLayerColor', { id, color }); } catch (e) { LMApp.status(e.message); }
-    }
-    if (saved && saved.length) {
-      muteEcho();
-      try { await LMHost.call('selectLayers', saved); } catch (e) { LMApp.status(e.message); }
-    }
-    muteEcho();
-    const layers = await LMHost.call('getLayers');
-    LMState.layers = layers;
-  }
-
-  async function setMark(layerIds, categoryId, valueId, on) {
-    const marks = LMState.docData.marks;
-    for (const id of layerIds) {
-      const key = String(id);
-      const mark = marks[key] || (marks[key] = {});
-      const set = new Set(mark[categoryId] || []);
-      if (on) set.add(valueId); else set.delete(valueId);
-      if (set.size) mark[categoryId] = Array.from(set); else delete mark[categoryId];
-      if (!Object.keys(mark).length) delete marks[key];
-    }
-    await LMApp.saveDocData();
-    await applyNativeColor(layerIds);
+  // 조합 선택이나 조합 데이터가 바뀐 뒤. 미리보기(Task 7)가 여기에 붙는다.
+  async function afterComboChange() {
     LMApp.render();
   }
 
-  document.addEventListener('click', async e => {
-    const inTab = e.target.closest('#tab-layers');
-    if (!inTab) return;
-    const caret = e.target.closest('#tab-layers .caret');
-    const rowEl = e.target.closest('#tab-layers .layer-row');
-    if (caret && rowEl && rowEl.classList.contains('group')) {
-      const id = Number(rowEl.dataset.layer);
-      if (LMState.collapsed.has(id)) LMState.collapsed.delete(id); else LMState.collapsed.add(id);
-      return LMApp.render();
+  // ---- 조작 ----
+
+  async function syncSelection() {
+    LMApp.muteEcho();
+    try { await LMHost.call('selectLayers', LMState.selectedIds); } catch (err) { LMApp.status(err.message); }
+    LMApp.muteEcho();
+  }
+
+  function rangeIds(fromId, toId) {
+    const ids = visibleRows().map(l => l.id);
+    const a = ids.indexOf(fromId), b = ids.indexOf(toId);
+    if (a === -1 || b === -1) return [toId];
+    return ids.slice(Math.min(a, b), Math.max(a, b) + 1);
+  }
+
+  async function onRowClick(e, rowEl) {
+    const id = Number(rowEl.dataset.layer);
+    if (e.shiftKey && LMState.anchorId != null) {
+      LMState.selectedIds = rangeIds(LMState.anchorId, id);
+    } else if (e.ctrlKey || e.metaKey) {
+      LMState.selectedIds = LMState.selectedIds.includes(id) ? LMState.selectedIds.filter(x => x !== id) : LMState.selectedIds.concat(id);
+      LMState.anchorId = id;
+    } else {
+      LMState.selectedIds = [id];
+      LMState.anchorId = id;
     }
+    LMApp.render();
+    await syncSelection();
+  }
+
+  async function onCheckbox(cb, rowEl) {
+    if (cb.classList.contains('inherited')) {
+      LMState.combo = JSON.parse(cb.dataset.from);
+      return afterComboChange();
+    }
+    const id = Number(rowEl.dataset.layer);
+    const selected = selectedExisting();
+    const targets = selected.includes(id) ? selected : [id];
+    const on = !cb.classList.contains('checked');
+    LMState.docData.combos = C().toggle(LMState.docData.combos, LMState.combo, targets, on);
+    // 저장이 끝난 뒤에 다시 그린다 (categories.js commit()과 같은 이유: 클릭 삼킴 방지).
+    await LMApp.saveDocData();
+    return afterComboChange();
+  }
+
+  async function onClick(e) {
+    const rowEl = e.target.closest('#tab-layers .layer-row');
     if (rowEl) {
-      const id = Number(rowEl.dataset.layer);
-      if (e.ctrlKey || e.metaKey) {
-        LMState.selectedIds = LMState.selectedIds.includes(id) ? LMState.selectedIds.filter(x => x !== id) : LMState.selectedIds.concat(id);
-      } else {
-        LMState.selectedIds = [id];
+      if (e.target.closest('.caret') && rowEl.classList.contains('group')) {
+        const id = Number(rowEl.dataset.layer);
+        if (LMState.collapsed.has(id)) LMState.collapsed.delete(id); else LMState.collapsed.add(id);
+        return LMApp.render();
       }
-      LMApp.render();
-      muteEcho();
-      try { await LMHost.call('selectLayers', LMState.selectedIds); } catch (err) { LMApp.status(err.message); }
-      muteEcho();
-      return;
+      const cb = e.target.closest('.cb');
+      if (cb) return onCheckbox(cb, rowEl);
+      return onRowClick(e, rowEl);
     }
     const btn = e.target.closest('#tab-layers [data-action]');
     if (!btn) return;
-    if (btn.dataset.action === 'marks-clear') {
-      const ids = LMState.selectedIds.slice();
-      for (const id of ids) delete LMState.docData.marks[String(id)];
-      try {
-        await LMApp.saveDocData();
-        await applyNativeColor(ids);
-      } catch (err) { LMApp.status(err.message); }
-      return LMApp.render();
+    if (btn.dataset.action === 'remove-selected') {
+      const ids = selectedExisting();
+      const m = C().countWithLayers(LMState.docData.combos, ids);
+      if (!m || !confirm(`레이어 ${ids.length}개를 조합 ${m}개에서 뺍니다. 계속할까요?`)) return;
+      LMState.docData.combos = C().removeLayers(LMState.docData.combos, ids);
+      await LMApp.saveDocData();
+      return afterComboChange();
     }
     if (btn.dataset.action === 'orphans-clean') {
-      for (const id of LMCore.jobs.orphanMarkIds(LMState.docData.marks, LMState.layers)) delete LMState.docData.marks[String(id)];
+      LMState.docData.combos = C().pruneOrphans(LMState.docData.combos, LMState.layers);
       await LMApp.saveDocData();
       return LMApp.render();
     }
-  });
+  }
 
+  async function onChange(e) {
+    const pick = e.target.closest('#tab-layers select[data-combo-cat]');
+    const made = e.target.closest('#tab-layers select.made-select');
+    if (pick) {
+      const next = Object.assign({}, LMState.combo);
+      if (pick.value) next[pick.dataset.comboCat] = pick.value; else delete next[pick.dataset.comboCat];
+      LMState.combo = next;
+      return afterComboChange();
+    }
+    if (made && made.value) {
+      LMState.combo = JSON.parse(made.value);
+      return afterComboChange();
+    }
+  }
+
+  // 리스너는 동기로 두고 비동기 본문의 거부를 한곳에서 받는다 (컨벤션 #2).
+  document.addEventListener('click', e => {
+    if (!e.target.closest('#tab-layers')) return;
+    onClick(e).catch(err => LMApp.status(err.message));
+  });
   document.addEventListener('change', e => {
-    const box = e.target.closest('#tab-layers .mark-panel input[data-category]');
-    if (!box) return;
-    // markPanel과 같은 기준으로 거른다. 낡은 선택 id가 남아 있으면 문서에 없는
-    // 레이어의 마크(고아 마크)를 새로 만들게 된다.
-    const ids = LMState.selectedIds.filter(id => LMState.layers.some(l => l.id === id));
-    setMark(ids, box.dataset.category, box.dataset.value, box.checked).catch(e => LMApp.status(e.message));
+    if (!e.target.closest('#tab-layers')) return;
+    onChange(e).catch(err => LMApp.status(err.message));
   });
 
-  return { render, setMark };
+  return { render, afterComboChange };
 })();

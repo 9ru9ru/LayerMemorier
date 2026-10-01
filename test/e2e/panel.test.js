@@ -53,6 +53,25 @@ async function restoreDialogs(p) {
     true`);
 }
 
+// 레이어 탭 행 하나의 체크박스 상태: 'checked' | 'inherited' | 'none'
+function cbState(id) {
+  return `(() => {
+    const cb = document.querySelector('#tab-layers [data-layer="${id}"] .cb');
+    return cb.classList.contains('checked') ? 'checked' : cb.classList.contains('inherited') ? 'inherited' : 'none';
+  })()`;
+}
+const pickCombo = (categoryId, valueId) => setField(`#tab-layers select[data-combo-cat=${categoryId}]`, valueId);
+const clickCb = id => `document.querySelector('#tab-layers [data-layer="${id}"] .cb').click(); true`;
+function clickRow(id, mods = {}) {
+  return `(() => {
+    const el = document.querySelector('#tab-layers [data-layer="${id}"] .name');
+    el.dispatchEvent(new MouseEvent('click', Object.assign({ bubbles: true }, ${JSON.stringify(mods)})));
+    return true;
+  })()`;
+}
+const asc = list => list.slice().sort((a, b) => a - b);
+const entryOf = (combos, when) => combos.find(c => Object.keys(c.when).length === Object.keys(when).length && Object.keys(when).every(k => c.when[k] === when[k]));
+
 test('panel boots, sees the fixture document, and applies a preset', async () => {
   const hadPresets = fs.existsSync(PRESETS);
   const backup = hadPresets ? fs.readFileSync(PRESETS) : null;
@@ -347,6 +366,203 @@ test('version 1 document data is converted on load and saved as version 2 on the
     assert.equal('nativeColor' in stored, false);
     assert.equal(stored.combos.length, 3);
   } finally {
+    p.close();
+  }
+});
+
+test('layer tab: picking a combo shows its layers, checkbox writes combos to XMP', async () => {
+  const { byName } = buildFixture();
+  psCall('writeDocData', docDataFor(byName));
+  const colorsBefore = psCall('getLayers').map(l => [l.name, l.color]);
+  const p = await freshPanel();
+  try {
+    await p.eval(`document.querySelector('#tabs [data-tab=layers]').click(); true`);
+    assert.equal(await p.eval(`document.querySelectorAll('#tab-layers .layer-row').length`), 12);
+    assert.equal(await p.eval(`document.querySelectorAll('#tab-layers .badge, #tab-layers .mark-panel').length`), 0, '배지·아래쪽 마킹 영역은 없다');
+
+    // 기본 = 모든 조합. A0 은 "A0" 항목에만 있으므로 none, 행 오른쪽에 조합 이름.
+    assert.equal(await p.eval(cbState(byName.A0)), 'none');
+    assert.equal(await p.eval(`document.querySelector('#tab-layers [data-layer="${byName.A0}"] .combos').textContent`), 'A0');
+    assert.equal(await p.eval(`document.querySelector('#tab-layers [data-layer="${byName.BG}"] .combos')`), null);
+
+    await p.eval(pickCombo('cA', 'a0'));
+    assert.equal(await p.eval(cbState(byName.A0)), 'checked');
+    assert.equal(await p.eval(cbState(byName.B0)), 'none');
+
+    await p.eval(pickCombo('cB', 'b2'));
+    assert.equal(await p.eval(cbState(byName.A0)), 'inherited');
+    assert.equal(await p.eval(cbState(byName.B2)), 'inherited');
+    assert.equal(await p.eval(cbState(byName.H)), 'none');
+    assert.equal(await p.eval(`document.querySelector('#tab-layers select.made-select').value`), '', '아직 없는 조합');
+
+    // H 를 A0_B2 에 넣는다.
+    await p.eval(clickCb(byName.H));
+    await settle();
+    assert.equal(await p.eval(cbState(byName.H)), 'checked');
+    assert.deepEqual(entryOf(psCall('readDocData').combos, { cA: 'a0', cB: 'b2' }).layers, [byName.H]);
+    assert.equal(await p.eval(`document.querySelector('#tab-layers select.made-select').selectedOptions[0].textContent`), 'A0_B2 · 1개');
+
+    // 다시 누르면 빠지고, 빈 항목은 사라진다.
+    await p.eval(clickCb(byName.H));
+    await settle();
+    assert.equal(await p.eval(cbState(byName.H)), 'none');
+    assert.equal(entryOf(psCall('readDocData').combos, { cA: 'a0', cB: 'b2' }), undefined);
+
+    // inherited 를 누르면 그 넓은 조합으로 이동하고 데이터는 그대로다.
+    const before = JSON.stringify(psCall('readDocData').combos);
+    await p.eval(clickCb(byName.A0));
+    await settle();
+    assert.deepEqual(await p.eval('LMState.combo'), { cA: 'a0' });
+    assert.equal(await p.eval(`document.querySelector('#tab-layers select[data-combo-cat=cB]').value`), '');
+    assert.equal(JSON.stringify(psCall('readDocData').combos), before);
+
+    // 만든 조합 드롭다운으로 이동한다.
+    await p.eval(`(() => {
+      const s = document.querySelector('#tab-layers select.made-select');
+      s.value = Array.from(s.options).find(o => o.textContent.startsWith('B1 ')).value;
+      s.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    })()`);
+    assert.deepEqual(await p.eval('LMState.combo'), { cB: 'b1' });
+    assert.equal(await p.eval(cbState(byName.B1)), 'checked');
+
+    assert.deepEqual(psCall('getLayers').map(l => [l.name, l.color]), colorsBefore, '레이어 색은 바뀌지 않는다');
+  } finally {
+    p.close();
+  }
+});
+
+test('layer tab: Shift/Ctrl selection, checkbox on a selected row applies to all selected, remove from all combos', async () => {
+  const { byName } = buildFixture();
+  psCall('writeDocData', docDataFor(byName));
+  const p = await freshPanel();
+  try {
+    await stubDialogs(p);
+    await p.eval(`document.querySelector('#tabs [data-tab=layers]').click(); true`);
+    await p.eval(pickCombo('cA', 'a1'));
+    await p.eval(pickCombo('cB', 'b1'));
+
+    await p.eval(clickRow(byName.B0));
+    await settle();
+    await p.eval(clickRow(byName.N1, { shiftKey: true }));
+    await settle();
+    const range = asc([byName.B0, byName.B1, byName.B2, byName.N1]);
+    assert.deepEqual(asc(await p.eval('LMState.selectedIds')), range);
+    assert.deepEqual(asc(psCall('getSelectedLayerIds')), range, '포토샵 선택도 같다');
+
+    await p.eval(clickRow(byName.B1, { ctrlKey: true }));
+    await settle();
+    const picked = asc([byName.B0, byName.B2, byName.N1]);
+    assert.deepEqual(asc(await p.eval('LMState.selectedIds')), picked);
+
+    // 선택된 행의 체크박스 → 선택 전부
+    await p.eval(clickCb(byName.B2));
+    await settle();
+    assert.deepEqual(asc(entryOf(psCall('readDocData').combos, { cA: 'a1', cB: 'b1' }).layers), picked);
+
+    // 선택 밖 행의 체크박스 → 그 행만, 선택은 그대로
+    await p.eval(clickCb(byName.H));
+    await settle();
+    assert.deepEqual(asc(entryOf(psCall('readDocData').combos, { cA: 'a1', cB: 'b1' }).layers), asc(picked.concat(byName.H)));
+    assert.deepEqual(asc(await p.eval('LMState.selectedIds')), picked);
+
+    // 모든 조합에서 빼기: B0(B0 항목·A1_B1), B2(B2·A1_B1), N1(N1·A1_B1) → 조합 4개
+    await p.eval(`window.__confirmResult = false; window.__dialogs = []; true`);
+    await p.eval(`document.querySelector('[data-action=remove-selected]').click(); true`);
+    await settle();
+    assert.match(await p.eval('window.__dialogs[0][1]'), /레이어 3개를 조합 4개에서 뺍니다/);
+    assert.ok(entryOf(psCall('readDocData').combos, { cN: 'n1' }), '취소하면 그대로');
+
+    await p.eval(`window.__confirmResult = true; true`);
+    await p.eval(`document.querySelector('[data-action=remove-selected]').click(); true`);
+    await settle();
+    const combos = psCall('readDocData').combos;
+    for (const id of picked) assert.equal(combos.some(c => c.layers.includes(id)), false, 'layer ' + id);
+    assert.deepEqual(entryOf(combos, { cA: 'a1', cB: 'b1' }).layers, [byName.H]);
+    assert.deepEqual(entryOf(combos, { cB: 'b0' }).layers, [byName.GA]);
+    assert.equal(entryOf(combos, { cN: 'n1' }), undefined, '빈 항목은 사라진다');
+    assert.equal(await p.eval(`document.querySelector('[data-action=remove-selected]').disabled`), true, '더 뺄 조합이 없다');
+  } finally {
+    await restoreDialogs(p).catch(() => {});
+    p.close();
+  }
+});
+
+test('layer tab: Photoshop selection sync, group collapse, orphan cleanup, fixed combo bar', async () => {
+  const { byName } = buildFixture();
+  psCall('writeDocData', docDataFor(byName));
+  const p = await freshPanel();
+  try {
+    await p.eval(`document.querySelector('#tabs [data-tab=layers]').click(); true`);
+
+    psCall('selectLayers', [byName.B1]);
+    await new Promise(r => setTimeout(r, 800));
+    assert.deepEqual(await p.eval('LMState.selectedIds'), [byName.B1]);
+    assert.equal(await p.eval(`document.querySelector('#tab-layers [data-layer="${byName.B1}"]').classList.contains('selected')`), true);
+
+    await p.eval(`document.querySelector('#tab-layers [data-layer="${byName.G}"] .caret').click(); true`);
+    assert.equal(await p.eval(`document.querySelectorAll('#tab-layers .layer-row').length`), 10);
+    await p.eval(`document.querySelector('#tab-layers [data-layer="${byName.G}"] .caret').click(); true`);
+
+    await p.eval(`LMState.docData.combos.push({ when: { cA: 'a0' }, layers: [999999] }); LMApp.render(); true`);
+    assert.match(await p.eval(`document.querySelector('#tab-layers .orphans').textContent`), /문서에 없는 레이어 1개/);
+    await p.eval(`document.querySelector('[data-action=orphans-clean]').click(); true`);
+    await settle();
+    assert.equal(await p.eval(`LMState.docData.combos.some(c => c.layers.includes(999999))`), false);
+
+    // 트리만 스크롤된다: 창을 낮게 만들어 트리를 넘치게 한 뒤 끝까지 내린다.
+    await p.emulate(440, 260);
+    await p.eval('LMApp.render(); true');
+    const barTop = await p.eval(`document.querySelector('#tab-layers select[data-combo-cat=cA]').getBoundingClientRect().top`);
+    await p.eval(`document.querySelector('#tab-layers .tree').scrollTop = 99999; true`);
+    assert.ok((await p.eval(`document.querySelector('#tab-layers .tree').scrollTop`)) > 0, '트리가 스크롤된다');
+    assert.equal(await p.eval(`document.querySelector('main').scrollTop`), 0, 'main 은 스크롤되지 않는다');
+    assert.equal(await p.eval(`document.querySelector('#tab-layers select[data-combo-cat=cA]').getBoundingClientRect().top`), barTop, '조합 선택은 제자리');
+    const kept = await p.eval(`document.querySelector('#tab-layers .tree').scrollTop`);
+    await p.eval('LMApp.render(); true');
+    assert.equal(await p.eval(`document.querySelector('#tab-layers .tree').scrollTop`), kept, '다시 그려도 트리 스크롤 유지');
+  } finally {
+    await p.emulate(null).catch(() => {});
+    p.close();
+  }
+});
+
+test('layer tab: renders 600 layers x 150 combos quickly and looks right at 320/default/900 widths', async () => {
+  const { byName } = buildFixture();
+  const data = docDataFor(byName);
+  data.combos.push({ when: { cA: 'a0', cB: 'b2' }, layers: [byName.H, byName.GB] });
+  psCall('writeDocData', data);
+  const p = await freshPanel();
+  try {
+    await p.eval(`document.querySelector('#tabs [data-tab=layers]').click(); true`);
+    await p.eval(pickCombo('cA', 'a0'));
+    await p.eval(pickCombo('cB', 'b2'));
+    await p.eval(`LMState.selectedIds = [${byName.B2}, ${byName.H}]; LMApp.render(); true`);
+    for (const [label, w, h] of [['layers-320', 320, 600], ['layers-default', 520, 760], ['layers-900', 900, 760]]) {
+      await p.emulate(w, h);
+      await p.eval('LMApp.render(); true');
+      await p.shot(label);
+      assert.ok(await p.eval(`document.documentElement.scrollWidth <= window.innerWidth + 1`), label + ': 가로 스크롤 없음');
+    }
+    await p.emulate(null);
+
+    const ms = await p.eval(`(() => {
+      const realLayers = LMState.layers, realCombos = LMState.docData.combos;
+      const cats = LMState.docData.categories;
+      LMState.layers = Array.from({ length: 600 }, (_, i) => ({ id: 100000 + i, name: 'L' + i, kind: 'layer', visible: true, depth: 0, parentId: null, color: 'none' }));
+      LMState.docData.combos = Array.from({ length: 150 }, (_, i) => ({
+        when: { cA: cats[0].values[i % 2].id, cB: cats[1].values[i % 3].id, cN: cats[2].values[i % 2].id, ['x' + i]: 'y' },
+        layers: Array.from({ length: 20 }, (_, j) => 100000 + ((i * 7 + j * 31) % 600)),
+      }));
+      const t0 = performance.now();
+      LMApp.render();
+      const t = performance.now() - t0;
+      LMState.layers = realLayers; LMState.docData.combos = realCombos; LMApp.render();
+      return t;
+    })()`);
+    assert.ok(ms < 300, `render took ${ms}ms`);
+  } finally {
+    await p.emulate(null).catch(() => {});
     p.close();
   }
 });
