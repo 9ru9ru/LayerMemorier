@@ -25,16 +25,16 @@ function reopenFixture() {
   return { layers, byName };
 }
 
-// 템플릿의 marksByName을 layerId 키 marks로 바꾼 문서 데이터.
+// 템플릿의 combosByName(레이어 이름)을 layerId로 바꾼 version 2 문서 데이터.
 function docDataFor(byName, destination = '') {
   const t = JSON.parse(fs.readFileSync(TEMPLATE, 'utf8'));
-  const marks = {};
-  for (const name of Object.keys(t.marksByName)) {
+  const idOf = name => {
     if (!(name in byName)) throw new Error('fixture layer missing: ' + name);
-    marks[String(byName[name])] = t.marksByName[name];
-  }
-  delete t.marksByName;
-  return Object.assign(t, { marks, destination });
+    return byName[name];
+  };
+  t.combos = t.combosByName.map(c => ({ when: c.when, layers: c.layers.map(idOf) }));
+  delete t.combosByName;
+  return Object.assign(t, { destination });
 }
 
 module.exports = { buildFixture, reopenFixture, docDataFor, PSD };

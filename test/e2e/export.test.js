@@ -7,7 +7,8 @@ const { PNG } = require('pngjs');
 const { psRun, psCall, ROOT } = require('../helpers/ps');
 const { buildFixture, docDataFor } = require('../helpers/fixture');
 const { enumerate } = require('../../core/variation');
-const { buildJobs, markedLayerIds } = require('../../core/jobs');
+const { buildJobs } = require('../../core/jobs');
+const { managedLayerIds } = require('../../core/combos');
 
 const DEST = path.join(ROOT, 'test', 'out', 'export', '한글 폴더');
 const CELL = {
@@ -61,7 +62,7 @@ test('export writes every variation with correct pixels and restores visibility'
   assert.equal(jobs.length, 12);
 
   const before = psCall('getLayers').map(l => [l.name, l.visible]);
-  const results = runExport(jobs, markedLayerIds(docData.marks, layers));
+  const results = runExport(jobs, managedLayerIds(docData.combos, layers));
   for (const r of results) assert.equal(r.ok, true, JSON.stringify(r));
 
   const written = [];
@@ -94,7 +95,7 @@ test('export writes every variation with correct pixels and restores visibility'
 test('exportOne reports an error for an unwritable path and export continues', () => {
   const { layers, byName } = buildFixture();
   const docData = docDataFor(byName, DEST);
-  const bad = psCall('exportBegin', { layerIds: markedLayerIds(docData.marks, layers) });
+  const bad = psCall('exportBegin', { layerIds: managedLayerIds(docData.combos, layers) });
   assert.equal(bad.ok, true);
   const out = psRun(`LM.exportOne(${JSON.stringify(JSON.stringify({ on: [], off: [], path: 'Q:/no/such/drive/x.png' }))})`);
   assert.match(out, /"error"/);

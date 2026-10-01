@@ -1,9 +1,8 @@
 {
-  "version": 1,
+  "version": 2,
   "baseName": "fx",
   "delimiter": "_",
   "destination": "",
-  "nativeColor": false,
   "categories": [
     { "id": "cA", "name": "A", "color": "red", "labelFormat": "{c}{v}", "folder": true,
       "values": [ { "id": "a0", "name": "0", "label": "0" }, { "id": "a1", "name": "1", "label": "1" } ] },
@@ -12,16 +11,14 @@
     { "id": "cN", "name": "N", "color": "green", "labelFormat": "{v}", "folder": false,
       "values": [ { "id": "n1", "name": "1", "label": "1" }, { "id": "n2", "name": "2", "label": "2" } ] }
   ],
-  "marksByName": {
-    "A0": { "cA": ["a0"] },
-    "A1": { "cA": ["a1"] },
-    "B0": { "cB": ["b0"] },
-    "B1": { "cB": ["b1"] },
-    "B2": { "cB": ["b2"] },
-    "N1": { "cN": ["n1"] },
-    "N2": { "cN": ["n2"] },
-    "G":  { "cA": ["a1"] },
-    "GA": { "cB": ["b0"] }
-  },
+  "combosByName": [
+    { "when": { "cA": "a0" }, "layers": ["A0"] },
+    { "when": { "cA": "a1" }, "layers": ["A1", "G"] },
+    { "when": { "cB": "b0" }, "layers": ["B0", "GA"] },
+    { "when": { "cB": "b1" }, "layers": ["B1"] },
+    { "when": { "cB": "b2" }, "layers": ["B2"] },
+    { "when": { "cN": "n1" }, "layers": ["N1"] },
+    { "when": { "cN": "n2" }, "layers": ["N2"] }
+  ],
   "excluded": []
 }

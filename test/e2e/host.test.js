@@ -44,23 +44,38 @@ test('selectLayers / getSelectedLayerIds round-trip (multi-select)', () => {
   assert.deepEqual(psCall('getSelectedLayerIds'), [byName.H]);
 });
 
-test('setLayerColor changes native color reported by getLayers', () => {
+test('applyVisibility sets visibility as one history step', () => {
   const { byName } = buildFixture();
-  psCall('setLayerColor', { id: byName.A0, color: 'violet' });
-  psCall('setLayerColor', { id: byName.G, color: 'yellowColor' });
-  const layers = psCall('getLayers');
-  assert.equal(layers.find(l => l.name === 'A0').color, 'violet');
-  assert.equal(layers.find(l => l.name === 'G').color, 'yellowColor');
-  psCall('setLayerColor', { id: byName.A0, color: 'none' });
-  assert.equal(psCall('getLayers').find(l => l.name === 'A0').color, 'none');
+  const states = () => Number(psRun('app.activeDocument.historyStates.length'));
+  // fixture 를 만드는 동안 히스토리가 기본 상한(50칸)에 닿아 있으면 한 칸이 늘어도
+  // 가장 오래된 칸이 빠져 개수가 그대로다. 비우고 센다.
+  psRun('app.purge(PurgeTarget.HISTORYCACHES); "purged"');
+  const before = states();
+  psCall('applyVisibility', { on: [byName.H], off: [byName.A0, byName.B1] });
+  assert.equal(states(), before + 1);
+  assert.equal(psRun('app.activeDocument.activeHistoryState.name'), 'LayerMemorier 미리보기');
+  const vis = {};
+  for (const l of psCall('getLayers')) vis[l.name] = l.visible;
+  assert.equal(vis.H, true);
+  assert.equal(vis.A0, false);
+  assert.equal(vis.B1, false);
+  assert.equal(vis.A1, true, 'layers not listed are untouched');
 
-  // 숨겨진 레이어를 칠해도 가시성이 바뀌면 안 된다: setLayerColor 안의 'slct' 에
-  // MkVs=false 가 빠져 있으면 대상 레이어가 켜진다.
-  assert.equal(psCall('getLayers').find(l => l.name === 'H').visible, false, 'H starts hidden');
-  psCall('setLayerColor', { id: byName.H, color: 'blue' });
-  const h = psCall('getLayers').find(l => l.name === 'H');
-  assert.equal(h.color, 'blue');
-  assert.equal(h.visible, false, 'colouring a hidden layer must not make it visible');
+  psCall('applyVisibility', { on: [], off: [] });
+  assert.equal(states(), before + 1, 'nothing to do leaves no history step');
+});
+
+test('getOpenDocKeys lists open documents by path, unsaved ones by name', () => {
+  const { psdPath } = buildFixture();
+  psRun('app.documents.add(10, 10, 72, "lm-untitled"); "added"');
+  try {
+    const keys = psCall('getOpenDocKeys');
+    assert.equal(keys.length, 2, JSON.stringify(keys));
+    assert.ok(keys.some(k => k.toLowerCase() === psdPath.toLowerCase()), JSON.stringify(keys));
+    assert.ok(keys.includes('lm-untitled'), JSON.stringify(keys));
+  } finally {
+    psRun('app.activeDocument.close(SaveOptions.DONOTSAVECHANGES); "closed"');
+  }
 });
 
 test('docData round-trips through XMP and survives save/reopen', () => {
@@ -77,7 +92,7 @@ test('docData round-trips through XMP and survives save/reopen', () => {
 
 test('writeDocData keeps unicode intact', () => {
   buildFixture();
-  const data = { version: 1, baseName: '알싸기 テスト', delimiter: '_', destination: 'D:/출력', nativeColor: true, categories: [], marks: {}, excluded: [] };
+  const data = { version: 2, baseName: '알싸기 テスト', delimiter: '_', destination: 'D:/출력', categories: [], combos: [], excluded: [] };
   psCall('writeDocData', data);
   assert.deepEqual(psCall('readDocData'), data);
 });

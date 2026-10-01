@@ -134,31 +134,6 @@ var LM = LM || {};
     return { ok: true };
   });
 
-  LM.setLayerColor = wrap(function (a) {
-    if (!hasDoc()) throw new Error('no document');
-    // The 'setd' action ignores a putIdentifier target for the 'Clr ' (layer
-    // color tag) property and always applies to the active layer instead, so
-    // the layer must be selected first and the set targeted at Ordn/Trgt.
-    var sref = new ActionReference();
-    sref.putIdentifier(cid('Lyr '), a.id);
-    var sdesc = new ActionDescriptor();
-    sdesc.putReference(cid('null'), sref);
-    // MkVs=false: without it the 'slct' action turns the target layer on, so
-    // colouring a hidden layer would silently un-hide it (same as selectLayers).
-    sdesc.putBoolean(cid('MkVs'), false);
-    executeAction(cid('slct'), sdesc, DialogModes.NO);
-
-    var ref = new ActionReference();
-    ref.putEnumerated(cid('Lyr '), cid('Ordn'), cid('Trgt'));
-    var desc = new ActionDescriptor();
-    desc.putReference(cid('null'), ref);
-    var props = new ActionDescriptor();
-    props.putEnumerated(cid('Clr '), cid('Clr '), sid(a.color));
-    desc.putObject(cid('T   '), cid('Lyr '), props);
-    executeAction(cid('setd'), desc, DialogModes.NO);
-    return { ok: true };
-  });
-
   // ---- document data in XMP ----
 
   var NS = 'http://layermemorier.local/1.0/';
@@ -188,7 +163,7 @@ var LM = LM || {};
   // Guard for the write path: the panel says which document it believes it is
   // writing to. Without this a stale panel view (document switched inside the
   // 200ms debounce, or a failed refresh) would replace document B's lm:data
-  // with document A's marks, which are keyed to A's layer ids.
+  // with document A's combos, which are keyed to A's layer ids.
   function checkExpectedDoc(expect) {
     var d = app.activeDocument;
     var p = null;
@@ -338,6 +313,43 @@ var LM = LM || {};
     setVisibleMany(off, false);
     snapshot = null;
     return { ok: true };
+  });
+
+  // ---- preview (combos spec section 6.3) ----
+
+  var pendingVisibility = null;
+
+  LM._runVisibility = function () {
+    setVisibleMany(pendingVisibility.on, true);
+    setVisibleMany(pendingVisibility.off, false);
+  };
+
+  // One history step per call so the artist can step back over a preview.
+  // History name is "LayerMemorier <preview in Korean>", escaped to keep this file ASCII.
+  LM.applyVisibility = wrap(function (a) {
+    if (!hasDoc()) throw new Error('no document');
+    var hasOn = a && a.on && a.on.length;
+    var hasOff = a && a.off && a.off.length;
+    if (!hasOn && !hasOff) return { ok: true };
+    pendingVisibility = { on: a.on || [], off: a.off || [] };
+    try {
+      app.activeDocument.suspendHistory('LayerMemorier \uBBF8\uB9AC\uBCF4\uAE30', 'LM._runVisibility()');
+    } finally {
+      pendingVisibility = null;
+    }
+    return { ok: true };
+  });
+
+  // Keys match the panel's docKey: full path when saved, otherwise the name.
+  LM.getOpenDocKeys = wrap(function () {
+    var keys = [];
+    for (var i = 0; i < app.documents.length; i++) {
+      var d = app.documents[i];
+      var p = null;
+      try { p = d.fullName.fsName; } catch (e) { p = null; }
+      keys.push(p || d.name);
+    }
+    return keys;
   });
 })();
 
