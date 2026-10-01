@@ -158,9 +158,46 @@
     return v;
   }
 
+  // version 1 → 2 (combos spec §4.2). 레이어 마크의 값 집합을 카테고리 순서대로 펼친다.
+  // 없는 카테고리 키·없는 값은 뺀다. 남는 것이 없으면 그 마크는 버리고 dropped로 센다.
+  function migrate(data) {
+    const categories = data.categories || [];
+    const known = new Map(categories.map(c => [c.id, new Set(c.values.map(v => v.id))]));
+    const marks = data.marks || {};
+    const combos = [];
+    let dropped = 0;
+    for (const key of Object.keys(marks)) {
+      const mark = marks[key] || {};
+      if (!Object.keys(mark).length) continue;
+      const id = Number(key);
+      let partials = [{}];
+      let considered = 0;
+      let empty = false;
+      for (const c of categories) {
+        if (!has(mark, c.id)) continue;
+        considered++;
+        const values = (mark[c.id] || []).filter(v => known.get(c.id).has(v));
+        if (!values.length) { empty = true; break; }
+        const next = [];
+        for (const p of partials) for (const v of values) next.push(Object.assign({}, p, { [c.id]: v }));
+        partials = next;
+      }
+      if (empty || considered === 0) { dropped++; continue; }
+      for (const when of partials) {
+        const hit = combos.find(c => sameWhen(c.when, when));
+        if (!hit) combos.push({ when, layers: [id] });
+        else if (hit.layers.indexOf(id) === -1) hit.layers.push(id);
+      }
+    }
+    const next = Object.assign({}, data, { version: 2, combos });
+    delete next.marks;
+    delete next.nativeColor;
+    return { data: next, dropped };
+  }
+
   return {
     matches, covers, sameWhen, onLayerIds, managedLayerIds, orphanLayerIds, pruneOrphans,
     toggle, removeLayers, countWithLayers, removeFor, countFor, layerState,
-    isStale, comboName, sortCombos, combosOfLayer, previewVariation,
+    isStale, comboName, sortCombos, combosOfLayer, previewVariation, migrate,
   };
 });

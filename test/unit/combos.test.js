@@ -135,3 +135,89 @@ test('previewVariation fills "all" categories with their first value', () => {
   assert.deepEqual(C.previewVariation({}, cats), { A: 'a0', B: 'b0', N: 'n1' });
   assert.equal(C.previewVariation({}, cats.concat(cat('E', []))), null, 'empty category: no preview');
 });
+
+// 기존 core/visibility.js 의 judge (변환 전 의미). 비교용으로 그대로 옮겨 둔다.
+function oldJudge(mark, variation, categories) {
+  if (!mark) return null;
+  const known = new Map(categories.map(c => [c.id, new Set(c.values.map(v => v.id))]));
+  let considered = 0;
+  for (const categoryId of Object.keys(mark)) {
+    const valid = known.get(categoryId);
+    if (!valid) continue;
+    considered++;
+    const allowed = (mark[categoryId] || []).filter(id => valid.has(id));
+    if (allowed.indexOf(variation[categoryId]) === -1) return false;
+  }
+  return considered === 0 ? null : true;
+}
+
+test('migrate expands value sets into entries and merges equal combos', () => {
+  const v1 = deepFreeze({
+    version: 1, baseName: 'fx', delimiter: '_', destination: 'D:/x', nativeColor: true, categories: cats, excluded: [{ A: 'a1' }],
+    marks: {
+      '20': { B: ['b2'], A: ['a0', 'a1'] },
+      '21': { A: ['a0'], B: ['b2'] },
+      '30': {},
+    },
+  });
+  const { data, dropped } = C.migrate(v1);
+  assert.equal(dropped, 0, 'an empty mark is not counted as dropped');
+  assert.equal(data.version, 2);
+  assert.equal('marks' in data, false);
+  assert.equal('nativeColor' in data, false);
+  assert.equal(data.destination, 'D:/x');
+  assert.deepEqual(data.excluded, [{ A: 'a1' }]);
+  assert.deepEqual(data.combos, [
+    { when: { A: 'a0', B: 'b2' }, layers: [20, 21] },
+    { when: { A: 'a1', B: 'b2' }, layers: [20] },
+  ]);
+});
+
+test('migrate drops missing categories/values and counts marks it had to discard', () => {
+  const v1 = {
+    version: 1, categories: cats, excluded: [],
+    marks: {
+      '10': { Z: ['z0'] },                 // 없는 카테고리뿐 → 버림 (전에도 안 건드림)
+      '11': { A: ['gone'] },               // 값이 전부 없음 → 버림 (전에는 항상 꺼짐)
+      '20': { Z: ['z0'], A: ['a1', 'gone'] }, // 없는 키·값만 빼고 남김
+    },
+  };
+  const { data, dropped } = C.migrate(v1);
+  assert.equal(dropped, 2);
+  assert.deepEqual(data.combos, [{ when: { A: 'a1' }, layers: [20] }]);
+});
+
+test('migrate preserves on/off/untouched for every variation (seeded random marks)', () => {
+  let seed = 12345; // mulberry32
+  const rand = () => {
+    seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const variation = require('../../core/variation');
+  for (let round = 0; round < 50; round++) {
+    const marks = {};
+    for (let id = 1; id <= 20; id++) {
+      const mark = {};
+      for (const c of cats) {
+        if (rand() < 0.5) continue;
+        const values = c.values.map(v => v.id).filter(() => rand() < 0.6);
+        if (values.length) mark[c.id] = values;
+      }
+      if (Object.keys(mark).length) marks[String(id)] = mark;
+    }
+    const docLayers = Array.from({ length: 20 }, (_, i) => ({ id: i + 1 }));
+    const { data, dropped } = C.migrate({ version: 1, categories: cats, excluded: [], marks });
+    assert.equal(dropped, 0);
+    const managed = new Set(C.managedLayerIds(data.combos, docLayers));
+    for (const v of variation.enumerate(cats)) {
+      const on = new Set(C.onLayerIds(data.combos, v));
+      for (let id = 1; id <= 20; id++) {
+        const expected = oldJudge(marks[String(id)], v, cats);
+        const actual = managed.has(id) ? on.has(id) : null;
+        assert.equal(actual, expected, `round ${round} layer ${id} ${JSON.stringify(v)}`);
+      }
+    }
+  }
+});
