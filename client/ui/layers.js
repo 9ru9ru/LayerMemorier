@@ -36,7 +36,7 @@ LMUI.layers = (() => {
       const n = e.layers.filter(id => existing.has(id)).length;
       return `<option value="${esc(JSON.stringify(e.when))}" ${e === current ? 'selected' : ''}>${esc(C().comboName(e.when, cats))} · ${n}개</option>`;
     })).join('');
-    return `<div class="row made"><label>만든 조합 <select class="made-select">${opts}</select></label></div>`;
+    return `<div class="row made"><label>만든 조합 <select class="made-select">${opts}</select></label>${LMPreview.toggleHtml()}</div>`;
   }
 
   function selectionBar() {
@@ -97,8 +97,11 @@ LMUI.layers = (() => {
     el.querySelector('.tree').scrollTop = keep;
   }
 
-  // 조합 선택이나 조합 데이터가 바뀐 뒤. 미리보기(Task 7)가 여기에 붙는다.
+  // 조합 선택이나 조합 데이터가 바뀐 뒤: 먼저 그리고, 미리보기가 켜져 있으면 반영한 뒤 눈 아이콘을 다시 그린다.
   async function afterComboChange() {
+    LMApp.render();
+    if (!LMPreview.isOn()) return;
+    await LMPreview.apply();
     LMApp.render();
   }
 
@@ -177,6 +180,11 @@ LMUI.layers = (() => {
   }
 
   async function onChange(e) {
+    const sw = e.target.closest('#tab-layers input.preview-switch');
+    if (sw) {
+      await (sw.checked ? LMPreview.enable() : LMPreview.disable());
+      return LMApp.render();
+    }
     const pick = e.target.closest('#tab-layers select[data-combo-cat]');
     const made = e.target.closest('#tab-layers select.made-select');
     if (pick) {

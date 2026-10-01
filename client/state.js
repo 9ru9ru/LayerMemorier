@@ -74,6 +74,10 @@ const LMApp = {
         LMState.anchorId = null;
         LMState.docKey = key;
       }
+      // 닫힌 문서의 미리보기 스냅샷은 버린다 (combos spec §6.3). 미리보기가 켜진 문서로
+      // 돌아왔으면 캔버스에 반영된 조합으로 선택을 되돌린다 (위에서 {}로 비웠으므로).
+      LMPreview.prune(info ? await LMHost.call('getOpenDocKeys') : []);
+      if (fresh && key && LMState.previews[key]) LMState.combo = Object.assign({}, LMState.previews[key].combo);
       if (!info) {
         LMState.docData = null; LMState.layers = []; LMState.selectedIds = [];
       } else {

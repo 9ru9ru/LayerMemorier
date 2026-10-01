@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const { connect } = require('../helpers/panel');
-const { psCall } = require('../helpers/ps');
+const { psCall, psRun } = require('../helpers/ps');
 const { buildFixture, docDataFor } = require('../helpers/fixture');
 
 const PRESETS = path.join(process.env.APPDATA, 'LayerMemorier', 'presets.json');
@@ -563,6 +563,84 @@ test('layer tab: renders 600 layers x 150 combos quickly and looks right at 320/
     assert.ok(ms < 300, `render took ${ms}ms`);
   } finally {
     await p.emulate(null).catch(() => {});
+    p.close();
+  }
+});
+
+test('layer tab: Photoshop preview applies the combo, follows changes, restores only what it touched', async () => {
+  const { byName } = buildFixture();
+  psCall('writeDocData', docDataFor(byName, path.join(__dirname, '..', 'out', 'preview-export').replace(/\\/g, '/')));
+  const vis = () => { const o = {}; for (const l of psCall('getLayers')) o[l.name] = l.visible; return o; };
+  const toggle = `document.querySelector('#tab-layers input.preview-switch').click(); true`;
+  const p = await freshPanel();
+  try {
+    await p.eval(`document.querySelector('#tabs [data-tab=layers]').click(); true`);
+    // 미리보기 전 손작업: 관리 아닌 H 를 켜고, 관리 레이어 A1 을 끈다.
+    psCall('applyVisibility', { on: [byName.H], off: [byName.A1] });
+    await new Promise(r => setTimeout(r, 800));
+    const before = vis();
+
+    await p.eval(pickCombo('cA', 'a1'));
+    await p.eval(pickCombo('cB', 'b0'));
+    await p.eval(toggle);
+    await settle();
+    let v = vis();
+    for (const [name, on] of Object.entries({ A0: false, A1: true, G: true, B0: true, GA: true, B1: false, B2: false, N1: true, N2: false })) {
+      assert.equal(v[name], on, 'A1_B0_N1 ' + name);
+    }
+    assert.equal(v.H, true, '관리 아닌 레이어는 그대로');
+    assert.equal(v.BG, true);
+    assert.match(await p.eval(`document.querySelector('#tab-layers .preview-label').textContent`), /A1_B0_N1로 표시 중/);
+
+    // 조합을 바꾸면 다시 반영된다.
+    await p.eval(pickCombo('cN', 'n2'));
+    await settle();
+    v = vis();
+    assert.equal(v.N1, false);
+    assert.equal(v.N2, true);
+
+    // 체크박스로 조합을 바꿔도 반영된다: B1 을 A1_B0_N2 에 넣으면 켜진다.
+    await p.eval(clickCb(byName.B1));
+    await settle();
+    assert.equal(vis().B1, true);
+
+    // 켜 둔 채 내보내기 → 끝나면 미리보기 상태로 돌아온다.
+    await p.eval(`LMState.include = { cA: ['a0'], cB: ['b0'], cN: ['n1'] }; true`);
+    const previewState = vis();
+    await p.eval('LMUI.export.run()');
+    assert.deepEqual((await p.eval('LMState.summary')).failures, []);
+    assert.deepEqual(vis(), previewState, '내보내기 뒤에는 미리보기 상태');
+
+    // 다른 문서로 갔다 오면: 그 문서에서는 꺼져 있고, 돌아오면 켜져 있다.
+    psRun('app.documents.add(10, 10, 72, "lm-other"); "added"');
+    await new Promise(r => setTimeout(r, 1200));
+    assert.equal(await p.eval('LMPreview.isOn()'), false);
+    psRun('app.activeDocument.close(SaveOptions.DONOTSAVECHANGES); "closed"');
+    await new Promise(r => setTimeout(r, 1200));
+    assert.equal(await p.eval('LMPreview.isOn()'), true);
+    assert.deepEqual(await p.eval('LMState.combo'), { cA: 'a1', cB: 'b0', cN: 'n2' }, '캔버스에 반영된 조합으로 선택이 돌아온다');
+
+    // 미리보기 중 손으로: 관리 아닌 BG 를 끄고, 관리 레이어 N2 를 지운다.
+    psCall('applyVisibility', { on: [], off: [byName.BG] });
+    psRun(`app.activeDocument.artLayers.getByName('N2').remove(); "removed"`);
+    await new Promise(r => setTimeout(r, 1000));
+
+    await p.eval(toggle);
+    await settle();
+    assert.equal(await p.eval(`document.getElementById('status').textContent`), '', '지워진 레이어가 있어도 오류 없음');
+    const after = vis();
+    const expected = Object.assign({}, before, { BG: false });
+    delete expected.N2;
+    assert.deepEqual(after, expected, '건드린 레이어만 원래대로, 손으로 바꾼 관리 아닌 레이어는 그대로');
+    assert.equal(await p.eval('LMPreview.isOn()'), false);
+
+    // 문서를 닫으면 스냅샷도 버린다.
+    await p.eval(toggle);
+    await settle();
+    psRun('while (app.documents.length) app.activeDocument.close(SaveOptions.DONOTSAVECHANGES); "closed"');
+    await new Promise(r => setTimeout(r, 1200));
+    assert.deepEqual(await p.eval('Object.keys(LMState.previews)'), []);
+  } finally {
     p.close();
   }
 });
