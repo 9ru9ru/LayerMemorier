@@ -120,6 +120,8 @@ LMUI.export = (() => {
       return LMApp.status('출력 폴더를 쓸 수 없습니다: ' + e.message);
     }
     const output = LMCore.output.normalize(d.output);
+    // 포토샵이 다른 문서로 바뀌어도 이 문서로 돌아와서 이어 가도록 매번 같이 보낸다 (리뷰 M9).
+    const doc = { name: LMState.docInfo.name, path: LMState.docInfo.path || null };
     const fast = LMCore.output.isFastPath(output);
     LMState.exporting = true; LMState.abort = false; LMState.summary = null;
     const failures = [];
@@ -129,21 +131,24 @@ LMUI.export = (() => {
     LMApp.render();
     try {
       await LMApp.saveDocData();
-      await LMHost.call('exportBegin', { layerIds: LMCore.combos.managedLayerIds(d.combos, LMState.layers) });
+      await LMHost.call('exportBegin', { layerIds: LMCore.combos.managedLayerIds(d.combos, LMState.layers), doc });
       let crop = null;
       let skip = false;
       // export spec §7 3단계: 공통 영역은 모든 조합을 먼저 잰다.
       if (output.trim === 'combined') {
-        LMState.progress = { phase: 'measure', done: 0, total: pv.jobs.length, current: '' };
+        // "모든 조합 공통 영역": 이번만 내보낼 값으로 줄인 목록이 아니라 (항상 뺄 조합만 뺀) 모든 조합을 잰다.
+        // 일부만 다시 내보내도 이전에 내보낸 파일과 크기·위치가 같아야 한다 (리뷰 I2).
+        const all = LMCore.jobs.buildJobs(d, LMState.layers, LMCore.variation.enumerate(d.categories, { excluded: d.excluded })).jobs;
+        LMState.progress = { phase: 'measure', done: 0, total: all.length, current: '' };
         LMApp.render(); // 진행 막대를 그린다 (renderProgressOnly는 이미 있는 막대만 고친다)
         renderProgressOnly();
         const measured = [];
         try {
-          for (const job of pv.jobs) {
+          for (const job of all) {
             if (LMState.abort) break;
             LMState.progress.current = job.relativePath;
             renderProgressOnly();
-            const r = await LMHost.call('measureBounds', { on: job.on, off: job.off });
+            const r = await LMHost.call('measureBounds', { on: job.on, off: job.off, doc });
             measured.push(r.bounds);
             LMState.progress.done++;
             renderProgressOnly();
@@ -165,7 +170,7 @@ LMUI.export = (() => {
           renderProgressOnly();
           const path = dest + '/' + job.relativePath;
           try {
-            const r = await LMHost.call('exportOne', { on: job.on, off: job.off, path, output, fast, crop });
+            const r = await LMHost.call('exportOne', { on: job.on, off: job.off, path, output, fast, crop, doc });
             succeeded++;
             if (r && r.path && r.path.toLowerCase() !== path.toLowerCase()) renamed++;
           } catch (e) {
@@ -179,7 +184,7 @@ LMUI.export = (() => {
     } catch (e) {
       failures.push({ path: '(시작)', error: hostMessage(e) });
     } finally {
-      try { await LMHost.call('exportEnd'); } catch (e) { failures.push({ path: '(복원)', error: e.message }); }
+      try { await LMHost.call('exportEnd', { doc }); } catch (e) { failures.push({ path: '(복원)', error: e.message }); }
       LMState.exporting = false;
       LMState.summary = { done, succeeded, renamed, failures, aborted: LMState.abort };
       LMState.progress = null;

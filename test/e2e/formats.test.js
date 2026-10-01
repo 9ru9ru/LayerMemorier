@@ -291,3 +291,68 @@ test('copy path on a Background-only document: trim keeps the full canvas, TGA a
     psRun('while (app.documents.length) app.activeDocument.close(SaveOptions.DONOTSAVECHANGES); "closed"');
   }
 });
+
+// 리뷰 I1: 실패하는 작업이 기존 출력 파일을 먼저 지우면 안 된다.
+test('a failing job keeps the existing file and leaves no temporary file behind', () => {
+  fs.mkdirSync(DEST, { recursive: true });
+  for (const f of fs.readdirSync(DEST)) if (f.startsWith('lm_')) fs.rmSync(out(f), { force: true });
+  fs.writeFileSync(out('keep.png'), 'previous export');
+  psRun('while (app.documents.length) app.activeDocument.close(SaveOptions.DONOTSAVECHANGES); app.documents.add(8200, 10, 72, "lm-wide2", NewDocumentMode.RGB, DocumentFill.WHITE); "ok"');
+  try {
+    const j = { on: [], off: [], path: DEST + '/keep.png', output: normalize({ format: 'png8' }), fast: true, crop: null };
+    const r = JSON.parse(psRun(`LM.exportOne(${JSON.stringify(JSON.stringify(j))})`));
+    assert.match(r.error, /LM_PNG8_TOO_LARGE/);
+    assert.equal(fs.readFileSync(out('keep.png'), 'utf8'), 'previous export', 'the previous export survives');
+    assert.deepEqual(fs.readdirSync(DEST).filter(f => f.startsWith('lm_')), [], 'no temporary file left');
+  } finally {
+    psRun('while (app.documents.length) app.activeDocument.close(SaveOptions.DONOTSAVECHANGES); "closed"');
+  }
+});
+
+// 리뷰 M10: 기본값과 아직 한 번도 실행하지 않은 옵션이 실제로 저장되는지.
+test('options smoke: TGA default (RLE), TIFF ZIP/JPG, JPG progressive, PNG-8 fixed palettes, background/foreground matte', () => {
+  const ctx = setup({ hideBg: true });
+  const v = V(ctx, 'a0', 'b0', 'n1');
+  const cases = [
+    [{ format: 'tga' }, 'opt-default.tga'],
+    [{ format: 'tif', tif: { compression: 'zip' } }, 'opt-zip.tif'],
+    [{ format: 'tif', tif: { compression: 'jpg', quality: 50 } }, 'opt-jpg.tif'],
+    [{ format: 'jpg', jpg: { progressive: true, icc: true } }, 'opt-prog.jpg'],
+    [{ format: 'png8', png8: { reduction: 'blackWhite' } }, 'opt-bw.png'],
+    [{ format: 'png8', png8: { reduction: 'grayscale' } }, 'opt-gray.png'],
+    [{ format: 'png8', png8: { reduction: 'mac' } }, 'opt-mac.png'],
+    [{ format: 'png8', png8: { reduction: 'windows', dither: 'pattern' } }, 'opt-win.png'],
+    [{ png24: { transparency: false, matte: 'background' } }, 'opt-bg.png'],
+    [{ png24: { transparency: false, matte: 'foreground' } }, 'opt-fg.png'],
+  ];
+  const res = run(ctx, cases.map(([o, f]) => jobFor(ctx, v, o, f)));
+  res.forEach((r, i) => assert.equal(r.ok, true, cases[i][1] + ': ' + JSON.stringify(r)));
+  for (const [, f] of cases) assert.ok(fs.statSync(out(f)).size > 0, f);
+  const tga = fs.readFileSync(out('opt-default.tga'));
+  assert.equal(tga[2], 10, 'default TGA is RLE compressed');
+});
+
+// 리뷰 M9: 내보내는 사이에 다른 문서가 활성화되면, 패널이 아는 문서로 돌아가서 이어 간다.
+test('export calls switch back to the expected document when another one became active', () => {
+  const ctx = setup();
+  const info = psCall('getDocInfo');
+  const doc = { name: info.name, path: info.path };
+  const v = V(ctx, 'a0', 'b0', 'n1');
+  const j = Object.assign(jobFor(ctx, v, {}, 'switched.png'), { doc });
+  psCall('exportBegin', { layerIds: managedLayerIds(ctx.docData.combos, ctx.layers), doc });
+  psRun('app.documents.add(10, 10, 72, "lm-intruder"); "added"');
+  try {
+    const r = psCall('exportOne', j);
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.equal(psRun('app.activeDocument.name'), 'fixture.psd');
+    assert.deepEqual(pixel(png('switched.png'), 20, 20).slice(0, 3), [255, 0, 0], 'saved from the fixture, A0 red');
+    psRun('app.activeDocument = app.documents.getByName("lm-intruder"); "switched"');
+    assert.deepEqual(psCall('measureBounds', { on: j.on, off: j.off, doc }).bounds !== undefined, true);
+    assert.equal(psRun('app.activeDocument.name'), 'fixture.psd');
+    psRun('app.activeDocument = app.documents.getByName("lm-intruder"); "switched"');
+    assert.equal(psCall('exportEnd', { doc }).ok, true);
+    assert.equal(psRun('app.activeDocument.name'), 'fixture.psd');
+  } finally {
+    psRun('app.documents.getByName("lm-intruder").close(SaveOptions.DONOTSAVECHANGES); "closed"');
+  }
+});

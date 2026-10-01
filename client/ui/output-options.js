@@ -53,7 +53,8 @@ LMUI.outputOptions = (() => {
           field('투명도 디더', select(o, 'png8.transparencyDither', DITHERS, !p.transparency)) +
           field('양', number(o, 'png8.transparencyDitherAmount', 0, 100, !p.transparency || p.transparencyDither !== 'diffusion'), '%') +
           check(o, 'png8.interlaced', '인터레이스') +
-          field('매트', select(o, 'png8.matte', MATTES, p.transparency));
+          // PNG-8 은 투명도를 켜도 매트가 반투명 가장자리 색을 정한다 (리뷰 M4). PNG-24 와 달리 막지 않는다.
+          field('매트', select(o, 'png8.matte', MATTES));
       }
       case 'jpg':
         return field('품질', number(o, 'jpg.quality', 0, 100)) + field('매트', select(o, 'jpg.matte', MATTES)) +

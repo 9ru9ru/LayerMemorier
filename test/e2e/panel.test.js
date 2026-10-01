@@ -1005,3 +1005,64 @@ test('layer tab shows Photoshop layer colors behind the eye and follows color ch
     p.close();
   }
 });
+
+// 리뷰 I2·M9: 공통 영역은 "이번만 내보낼 값"과 무관하게 (항상 뺄 조합만 뺀) 모든 조합을 재고,
+// 내보내기 호출에는 패널이 아는 문서를 같이 보낸다.
+test('combined trim measures every non-excluded variation even when exporting only some; calls carry the document', async () => {
+  const DEST = path.join(__dirname, '..', 'out', 'panel-combined-partial');
+  fs.rmSync(DEST, { recursive: true, force: true });
+  const { byName } = buildFixture();
+  psCall('applyVisibility', { on: [], off: [byName.BG] });
+  const data = docDataFor(byName, DEST.replace(/\\/g, '/'));
+  data.output = { trim: 'combined' };
+  psCall('writeDocData', data);
+  const p = await freshPanel();
+  try {
+    await p.eval(`document.querySelector('#tabs [data-tab=export]').click(); true`);
+    await p.eval(`document.querySelector('#tab-export .include input[data-category=cN][data-value=n1]').click(); true`);
+    assert.equal(await p.eval(`document.querySelector('#tab-export .count').textContent`), '6');
+    await p.eval(`
+      window.__calls = [];
+      window.__origLMHostCall = LMHost.call;
+      LMHost.call = (fn, arg) => { window.__calls.push([fn, arg && arg.doc ? arg.doc.name : null]); return window.__origLMHostCall(fn, arg); };
+      true`);
+    await p.eval('LMUI.export.run()');
+    const calls = await p.eval('window.__calls');
+    const measured = calls.filter(c => c[0] === 'measureBounds');
+    assert.equal(measured.length, 12, 'all 12 variations measured');
+    assert.equal(calls.filter(c => c[0] === 'exportOne').length, 6, 'only the 6 selected ones exported');
+    for (const fn of ['exportBegin', 'measureBounds', 'exportOne', 'exportEnd']) {
+      assert.ok(calls.filter(c => c[0] === fn).every(c => c[1] === 'fixture.psd'), fn + ' carries the document');
+    }
+    const crop = unionBounds(enumerate(data.categories).map(v => visibleBounds(v, ['BG'])));
+    const files = [];
+    for (const dir of fs.readdirSync(DEST)) for (const f of fs.readdirSync(path.join(DEST, dir))) files.push(path.join(DEST, dir, f));
+    assert.equal(files.length, 6);
+    for (const f of files) {
+      const img = PNG.sync.read(fs.readFileSync(f));
+      assert.deepEqual([img.width, img.height], [crop.right - crop.left, crop.bottom - crop.top], f);
+    }
+  } finally {
+    await p.eval(`if (window.__origLMHostCall) { LMHost.call = window.__origLMHostCall; delete window.__origLMHostCall; } true`).catch(() => {});
+    clearExportDefaults();
+    p.close();
+  }
+});
+
+// 리뷰 M4: PNG-8 은 투명도를 켜도 매트가 반투명 가장자리 색을 정하므로 막지 않는다 (PNG-24 는 막는다).
+test('export tab: PNG-8 matte stays editable with transparency on; PNG-24 matte does not', async () => {
+  const { byName } = buildFixture();
+  psCall('writeDocData', docDataFor(byName));
+  const p = await freshPanel();
+  try {
+    await p.eval(`document.querySelector('#tabs [data-tab=export]').click(); true`);
+    assert.equal(await p.eval(`document.querySelector('#tab-export [data-out="png24.matte"]').disabled`), true);
+    await p.eval(setField('#tab-export select[data-out=format]', 'png8'));
+    await settle();
+    assert.equal(await p.eval(`document.querySelector('#tab-export [data-out="png8.transparency"]').checked`), true);
+    assert.equal(await p.eval(`document.querySelector('#tab-export [data-out="png8.matte"]').disabled`), false);
+  } finally {
+    clearExportDefaults();
+    p.close();
+  }
+});

@@ -374,34 +374,47 @@ var LM = LM || {};
     return doc.width.as('px') > 8192 || doc.height.as('px') > 8192;
   }
 
-  // Save for Web rewrites file names (2026-10-02 probe: spaces became hyphens,
-  // "same (2).png" -> "same-(2).png"). Save under a plain temporary name in the
-  // target folder, then rename to the real name.
-  function viaTempName(file, ext, save) {
-    var tmp = new File(file.parent.fsName + '/lm_sfw_tmp.' + ext);
-    if (tmp.exists) tmp.remove();
-    save(tmp);
-    if (!tmp.exists) throw new Error('save failed, file not found: ' + tmp.fsName);
-    if (!tmp.rename(File.decode(file.name))) throw new Error('rename failed: ' + tmp.fsName + ' -> ' + File.decode(file.name));
-  }
-
   // PNG-24 / PNG-8 / JPG through Save for Web on the active document `doc`,
   // with the 8192px fallbacks of export spec section 5.3.
   function saveWeb(doc, file, o) {
     var big = tooBigForWeb(doc);
     if (o.format === 'png8') {
       if (big) throw new Error('LM_PNG8_TOO_LARGE');
-      viaTempName(file, 'png', function (t) { sfwPng8(t, o.png8); });
+      sfwPng8(file, o.png8);
     } else if (o.format === 'jpg') {
       if (big) saveAsJpg(doc, file, o.jpg, extensionCase(o));
-      else viaTempName(file, 'jpg', function (t) { sfwJpg(doc, t, o.jpg); });
+      else sfwJpg(doc, file, o.jpg);
     } else if (big) {
       var p = new PNGSaveOptions();
       p.compression = 6;
       p.interlaced = o.png24.interlaced;
       doc.saveAs(file, p, true, extensionCase(o));
     } else {
-      viaTempName(file, 'png', function (t) { sfwPng24(t, o.png24); });
+      sfwPng24(file, o.png24);
+    }
+  }
+
+  // Save under a plain temporary name in the target folder and replace the target only
+  // after the save succeeded: a failing job keeps the previous export (review I1), and
+  // Save for Web never sees the real name (2026-10-02 probe: it turned spaces into hyphens).
+  function saveReplacing(target, save) {
+    var name = File.decode(target.name);
+    var dot = name.lastIndexOf('.');
+    var tmp = new File(target.parent.fsName + '/lm_tmp_save' + (dot >= 0 ? name.substring(dot).toLowerCase() : ''));
+    var removedTarget = false;
+    if (tmp.exists) tmp.remove();
+    try {
+      save(tmp);
+      if (!tmp.exists) throw new Error('save failed, file not found: ' + tmp.fsName);
+      if (target.exists) {
+        if (!target.remove()) throw new Error('cannot replace the existing file: ' + target.fsName);
+        removedTarget = true;
+      }
+      if (!tmp.rename(name)) throw new Error('rename failed: ' + tmp.fsName + ' -> ' + name);
+    } catch (e) {
+      // Keep the new file as a recovery copy if the old one is already gone.
+      if (!removedTarget && tmp.exists) tmp.remove();
+      throw e;
     }
   }
 
@@ -554,6 +567,24 @@ var LM = LM || {};
     });
   }
 
+  // The panel names the document it is exporting. If the artist clicked another
+  // document tab between two calls, switch back to it instead of touching the other
+  // one (layer ids repeat across documents). Review M9.
+  function activateExpected(expect) {
+    if (!expect) return;
+    for (var i = 0; i < app.documents.length; i++) {
+      var d = app.documents[i];
+      var p = null;
+      try { p = d.fullName.fsName; } catch (e) { p = null; }
+      var same = expect.path ? (p && normPath(p) === normPath(expect.path)) : (!p && String(d.name) === String(expect.name));
+      if (same) {
+        if (app.activeDocument !== d) app.activeDocument = d;
+        return;
+      }
+    }
+    throw new Error('document closed: panel expected "' + (expect.path || expect.name) + '"');
+  }
+
   // Modal error dialogs (e.g. "the file is locked") would stop the panel and COM until
   // someone clicks OK. With dialogs off the error is thrown and reported for that job only.
   function withoutDialogs(fn) {
@@ -569,6 +600,7 @@ var LM = LM || {};
   // Content area of one variation (export spec 5.2); null when empty.
   LM.measureBounds = wrap(function (a) {
     if (!hasDoc()) throw new Error('no document');
+    activateExpected(a.doc);
     var doc = app.activeDocument;
     return withoutDialogs(function () {
       applyVisibilityAs('LayerMemorier export', a.on, a.off);
@@ -578,6 +610,7 @@ var LM = LM || {};
 
   LM.exportBegin = wrap(function (a) {
     if (!hasDoc()) throw new Error('no document');
+    activateExpected(a.doc);
     snapshot = [];
     for (var i = 0; i < a.layerIds.length; i++) {
       snapshot.push({ id: a.layerIds[i], visible: visibilityOf(a.layerIds[i]) });
@@ -587,6 +620,7 @@ var LM = LM || {};
 
   LM.exportOne = wrap(function (job) {
     if (!hasDoc()) throw new Error('no document');
+    activateExpected(job.doc);
     var doc = app.activeDocument;
     var o = job.output || LEGACY_OUTPUT;
     var fast = job.output ? job.fast === true : true;
@@ -594,15 +628,17 @@ var LM = LM || {};
       applyVisibilityAs('LayerMemorier export', job.on, job.off);
       var target = targetFile(job.path, o.overwrite);
       ensureFolder(target.parent);
-      if (target.exists) target.remove();
-      if (fast) saveWeb(doc, target, o);
-      else saveCopy(doc, target, o, job.crop || null);
+      saveReplacing(target, function (tmp) {
+        if (fast) saveWeb(doc, tmp, o);
+        else saveCopy(doc, tmp, o, job.crop || null);
+      });
       if (!target.exists) throw new Error('save failed, file not found: ' + target.fsName);
       return { ok: true, path: String(target.fsName).replace(/\\/g, '/') };
     });
   });
 
-  LM.exportEnd = wrap(function () {
+  LM.exportEnd = wrap(function (a) {
+    if (a) activateExpected(a.doc);
     if (!snapshot) return { ok: true };
     var on = [], off = [];
     for (var i = 0; i < snapshot.length; i++) {
