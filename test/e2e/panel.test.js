@@ -9,6 +9,7 @@ const { buildFixture, docDataFor } = require('../helpers/fixture');
 const { PNG } = require('pngjs');
 const { visibleBounds } = require('../helpers/cells');
 const { enumerate } = require('../../core/variation');
+const { onLayerIds } = require('../../core/combos');
 const { unionBounds } = require('../../core/output');
 
 const PRESETS = path.join(process.env.APPDATA, 'LayerMemorier', 'presets.json');
@@ -72,11 +73,11 @@ async function restoreDialogs(p) {
     true`);
 }
 
-// 레이어 탭 행 하나의 체크박스 상태: 'checked' | 'inherited' | 'none'
+// 레이어 탭 행 하나의 체크박스 상태: 'checked' | 'none'
 function cbState(id) {
   return `(() => {
     const cb = document.querySelector('#tab-layers [data-layer="${id}"] .cb');
-    return cb.classList.contains('checked') ? 'checked' : cb.classList.contains('inherited') ? 'inherited' : 'none';
+    return cb.classList.contains('checked') ? 'checked' : 'none';
   })()`;
 }
 const pickCombo = (categoryId, valueId) => setField(`#tab-layers select[data-combo-cat=${categoryId}]`, valueId);
@@ -399,51 +400,52 @@ test('layer tab: picking a combo shows its layers, checkbox writes combos to XMP
     assert.equal(await p.eval(`document.querySelectorAll('#tab-layers .layer-row').length`), 12);
     assert.equal(await p.eval(`document.querySelectorAll('#tab-layers .badge, #tab-layers .mark-panel').length`), 0, '배지·아래쪽 마킹 영역은 없다');
 
-    // 기본 = 모든 조합. A0 은 "A0" 항목에만 있으므로 none, 행 오른쪽에 조합 이름.
-    assert.equal(await p.eval(cbState(byName.A0)), 'none');
+    // "전체" 없음: 카테고리마다 첫 값이 골라져 있다 (A0_B0_N1). 체크 = 이 조합에서 켜짐 (어느 항목 때문이든).
+    assert.deepEqual(await p.eval('LMState.combo'), { cA: 'a0', cB: 'b0', cN: 'n1' });
+    assert.equal(await p.eval(`Array.from(document.querySelectorAll('#tab-layers select[data-combo-cat] option')).some(o => o.textContent === '전체')`), false);
+    assert.equal(await p.eval(`document.querySelector('#tab-layers select.made-select')`), null, '"만든 조합" 목록은 없다');
+    assert.equal(await p.eval(cbState(byName.A0)), 'checked');
+    assert.equal(await p.eval(cbState(byName.B0)), 'checked');
+    assert.equal(await p.eval(cbState(byName.A1)), 'none');
     assert.equal(await p.eval(`document.querySelector('#tab-layers [data-layer="${byName.A0}"] .combos').textContent`), 'A0');
     assert.equal(await p.eval(`document.querySelector('#tab-layers [data-layer="${byName.BG}"] .combos')`), null);
 
-    await p.eval(pickCombo('cA', 'a0'));
-    assert.equal(await p.eval(cbState(byName.A0)), 'checked');
-    assert.equal(await p.eval(cbState(byName.B0)), 'none');
-
     await p.eval(pickCombo('cB', 'b2'));
-    assert.equal(await p.eval(cbState(byName.A0)), 'inherited');
-    assert.equal(await p.eval(cbState(byName.B2)), 'inherited');
+    assert.equal(await p.eval(cbState(byName.A0)), 'checked');
+    assert.equal(await p.eval(cbState(byName.B2)), 'checked');
+    assert.equal(await p.eval(cbState(byName.B0)), 'none');
     assert.equal(await p.eval(cbState(byName.H)), 'none');
-    assert.equal(await p.eval(`document.querySelector('#tab-layers select.made-select').value`), '', '아직 없는 조합');
 
-    // H 를 A0_B2 에 넣는다.
+    // H 를 A0_B2_N1 에 넣는다.
     await p.eval(clickCb(byName.H));
     await settle();
     assert.equal(await p.eval(cbState(byName.H)), 'checked');
-    assert.deepEqual(entryOf(psCall('readDocData').combos, { cA: 'a0', cB: 'b2' }).layers, [byName.H]);
-    assert.equal(await p.eval(`document.querySelector('#tab-layers select.made-select').selectedOptions[0].textContent`), 'A0_B2 · 1개');
+    assert.deepEqual(entryOf(psCall('readDocData').combos, { cA: 'a0', cB: 'b2', cN: 'n1' }).layers, [byName.H]);
 
     // 다시 누르면 빠지고, 빈 항목은 사라진다.
     await p.eval(clickCb(byName.H));
     await settle();
     assert.equal(await p.eval(cbState(byName.H)), 'none');
-    assert.equal(entryOf(psCall('readDocData').combos, { cA: 'a0', cB: 'b2' }), undefined);
+    assert.equal(entryOf(psCall('readDocData').combos, { cA: 'a0', cB: 'b2', cN: 'n1' }), undefined);
 
-    // inherited 를 누르면 그 넓은 조합으로 이동하고 데이터는 그대로다.
-    const before = JSON.stringify(psCall('readDocData').combos);
+    // 넓은 항목(A0)에서 켜진 A0 를 끄면 이 조합에서만 빠지고 다른 조합에서는 그대로 켜져 있다.
     await p.eval(clickCb(byName.A0));
     await settle();
-    assert.deepEqual(await p.eval('LMState.combo'), { cA: 'a0' });
-    assert.equal(await p.eval(`document.querySelector('#tab-layers select[data-combo-cat=cB]').value`), '');
-    assert.equal(JSON.stringify(psCall('readDocData').combos), before);
+    assert.equal(await p.eval(cbState(byName.A0)), 'none');
+    const combos = psCall('readDocData').combos;
+    assert.equal(onLayerIds(combos, { cA: 'a0', cB: 'b2', cN: 'n1' }).includes(byName.A0), false);
+    assert.equal(onLayerIds(combos, { cA: 'a0', cB: 'b2', cN: 'n2' }).includes(byName.A0), true);
+    assert.equal(onLayerIds(combos, { cA: 'a0', cB: 'b0', cN: 'n1' }).includes(byName.A0), true);
+    await p.eval(pickCombo('cB', 'b0'));
+    assert.equal(await p.eval(cbState(byName.A0)), 'checked');
 
-    // 만든 조합 드롭다운으로 이동한다.
-    await p.eval(`(() => {
-      const s = document.querySelector('#tab-layers select.made-select');
-      s.value = Array.from(s.options).find(o => o.textContent.startsWith('B1 ')).value;
-      s.dispatchEvent(new Event('change', { bubbles: true }));
-      return true;
-    })()`);
-    assert.deepEqual(await p.eval('LMState.combo'), { cB: 'b1' });
-    assert.equal(await p.eval(cbState(byName.B1)), 'checked');
+    // 선택 레이어를 모든 조합에 넣기
+    await p.eval(clickRow(byName.H));
+    await settle();
+    await p.eval(`document.querySelector('[data-action=add-selected-all]').click(); true`);
+    await settle();
+    assert.deepEqual(entryOf(psCall('readDocData').combos, {}).layers, [byName.H]);
+    assert.equal(await p.eval(cbState(byName.H)), 'checked');
 
     assert.deepEqual(psCall('getLayers').map(l => [l.name, l.color]), colorsBefore, '레이어 색은 바뀌지 않는다');
   } finally {
@@ -477,15 +479,15 @@ test('layer tab: Shift/Ctrl selection, checkbox on a selected row applies to all
     // 선택된 행의 체크박스 → 선택 전부
     await p.eval(clickCb(byName.B2));
     await settle();
-    assert.deepEqual(asc(entryOf(psCall('readDocData').combos, { cA: 'a1', cB: 'b1' }).layers), picked);
+    assert.deepEqual(asc(entryOf(psCall('readDocData').combos, { cA: 'a1', cB: 'b1', cN: 'n1' }).layers), picked);
 
     // 선택 밖 행의 체크박스 → 그 행만, 선택은 그대로
     await p.eval(clickCb(byName.H));
     await settle();
-    assert.deepEqual(asc(entryOf(psCall('readDocData').combos, { cA: 'a1', cB: 'b1' }).layers), asc(picked.concat(byName.H)));
+    assert.deepEqual(asc(entryOf(psCall('readDocData').combos, { cA: 'a1', cB: 'b1', cN: 'n1' }).layers), asc(picked.concat(byName.H)));
     assert.deepEqual(asc(await p.eval('LMState.selectedIds')), picked);
 
-    // 모든 조합에서 빼기: B0(B0 항목·A1_B1), B2(B2·A1_B1), N1(N1·A1_B1) → 조합 4개
+    // 모든 조합에서 빼기: B0(B0 항목·A1_B1_N1), B2(B2·A1_B1_N1), N1(N1·A1_B1_N1) → 조합 4개
     await p.eval(`window.__confirmResult = false; window.__dialogs = []; true`);
     await p.eval(`document.querySelector('[data-action=remove-selected]').click(); true`);
     await settle();
@@ -497,7 +499,7 @@ test('layer tab: Shift/Ctrl selection, checkbox on a selected row applies to all
     await settle();
     const combos = psCall('readDocData').combos;
     for (const id of picked) assert.equal(combos.some(c => c.layers.includes(id)), false, 'layer ' + id);
-    assert.deepEqual(entryOf(combos, { cA: 'a1', cB: 'b1' }).layers, [byName.H]);
+    assert.deepEqual(entryOf(combos, { cA: 'a1', cB: 'b1', cN: 'n1' }).layers, [byName.H]);
     assert.deepEqual(entryOf(combos, { cB: 'b0' }).layers, [byName.GA]);
     assert.equal(entryOf(combos, { cN: 'n1' }), undefined, '빈 항목은 사라진다');
     assert.equal(await p.eval(`document.querySelector('[data-action=remove-selected]').disabled`), true, '더 뺄 조합이 없다');

@@ -275,3 +275,48 @@ test('layerSignature changes with structure, not with visibility or names', () =
   assert.notEqual(C.layerSignature(tree.slice(1)), a);
   assert.notEqual(C.layerSignature(tree.map(l => l.id === 4 ? Object.assign({}, l, { parentId: 1 }) : l)), a);
 });
+
+// ---- "전체" 없는 레이어 탭: 조합은 늘 모든 카테고리 값이 정해진 배리에이션 ----
+const { enumerate } = require('../../core/variation');
+const sameV = (a, b) => Object.keys(a).length === Object.keys(b).length && Object.keys(a).every(k => a[k] === b[k]);
+// 모든 배리에이션에서 id가 켜지는지 = expected(u)
+function assertOnExactly(combos, id, expected) {
+  for (const u of enumerate(cats)) assert.equal(C.onLayerIds(combos, u).includes(id), expected(u), `${id} in ${JSON.stringify(u)}`);
+}
+
+test('fillCombo picks a concrete value for every category (keeps valid ones, drops stale keys)', () => {
+  assert.deepEqual(C.fillCombo({ B: 'b2' }, cats), { A: 'a0', B: 'b2', N: 'n1' });
+  assert.deepEqual(C.fillCombo({ A: 'gone', Z: 'z' }, cats), { A: 'a0', B: 'b0', N: 'n1' });
+  assert.deepEqual(C.fillCombo({}, [cat('A', ['a0']), cat('E', [])]), { A: 'a0' }, 'a category without values stays unset');
+});
+
+test('removeFromVariation removes from the exact entry', () => {
+  const v = { A: 'a0', B: 'b1', N: 'n1' };
+  assert.deepEqual(C.removeFromVariation([{ when: v, layers: [10, 11] }], cats, v, [10]), [{ when: v, layers: [11] }]);
+});
+
+test('removeFromVariation on an "all combos" layer turns it off only in this variation', () => {
+  const v = { A: 'a0', B: 'b1', N: 'n2' };
+  const out = C.removeFromVariation(deepFreeze([{ when: {}, layers: [30, 31] }]), cats, v, [30]);
+  assertOnExactly(out, 30, u => !sameV(u, v));
+  assertOnExactly(out, 31, () => true);
+  assert.equal(out.length, 1 + (2 - 1) + (3 - 1) + (2 - 1), 'compact split: one entry per other value of each category');
+});
+
+test('removeFromVariation on a partial entry keeps the rest of that entry', () => {
+  const v = { A: 'a1', B: 'b1', N: 'n1' };
+  const out = C.removeFromVariation([{ when: { B: 'b1' }, layers: [20] }], cats, v, [20]);
+  assertOnExactly(out, 20, u => u.B === 'b1' && !sameV(u, v));
+});
+
+test('removeFromVariation clears every entry that turns the layer on here, other layers untouched', () => {
+  const v = { A: 'a0', B: 'b0', N: 'n1' };
+  const out = C.removeFromVariation([{ when: {}, layers: [30] }, { when: v, layers: [30, 11] }, { when: { A: 'a0' }, layers: [30] }], cats, v, [30]);
+  assertOnExactly(out, 30, u => !sameV(u, v));
+  assertOnExactly(out, 11, u => sameV(u, v));
+});
+
+test('removeFromVariation leaves combos alone when the layer is not on here', () => {
+  const combos = [{ when: { A: 'a1' }, layers: [10] }];
+  assert.deepEqual(C.removeFromVariation(combos, cats, { A: 'a0', B: 'b0', N: 'n1' }, [10]), combos);
+});

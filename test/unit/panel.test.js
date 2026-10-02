@@ -297,3 +297,61 @@ test('#6 nothing is rendered while another tab is shown; switching to the layer 
   await new Promise(r => setTimeout(r, 0));
   assert.equal(n, 1);
 });
+
+// ---- "전체" 없는 레이어 탭 ----
+
+test('the combo picker has no "전체" and always holds a concrete value per category', () => {
+  const { ctx, el } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', ['a0', 'a1']), cat('B', ['b0', 'b1'])], combos: [], layers: [L(1, null)] });
+  ctx.LMState.combo = { B: 'b1' };
+  const e = el(900);
+  ctx.LMUI.layers.render(e);
+  assert.doesNotMatch(e.innerHTML, /전체/);
+  assert.deepEqual(Object.assign({}, ctx.LMState.combo), { A: 'a0', B: 'b1' });
+  assert.doesNotMatch(e.innerHTML, /made-select/, '"만든 조합" list is gone');
+});
+
+test('a layer on through a broader entry shows as a plain checked box in this combo', () => {
+  const { ctx, el } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', ['a0', 'a1'])], combos: [{ when: {}, layers: [1] }, { when: { A: 'a1' }, layers: [2] }], layers: [L(1, null), L(2, null)] });
+  ctx.LMState.combo = { A: 'a0' };
+  const e = el(900);
+  ctx.LMUI.layers.render(e);
+  assert.match(e.innerHTML, /data-layer="1"[^]*?class="cb checked"/);
+  assert.match(e.innerHTML, /data-layer="2"[^]*?class="cb none"/);
+  assert.doesNotMatch(e.innerHTML, /inherited/);
+});
+
+test('unchecking an "all combos" layer turns it off only in the current combo (and the preview agrees)', () => {
+  const { ctx } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', ['a0', 'a1']), cat('B', ['b0', 'b1'])], combos: [{ when: {}, layers: [1] }], layers: [L(1, null)] });
+  ctx.LMState.combo = { A: 'a0', B: 'b1' };
+  ctx.LMUI.layers.setInCurrent([1], false);
+  const on = v => ctx.LMCore.combos.onLayerIds(ctx.LMState.docData.combos, v).includes(1);
+  assert.equal(on({ A: 'a0', B: 'b1' }), false);
+  assert.equal(on({ A: 'a0', B: 'b0' }), true);
+  assert.equal(on({ A: 'a1', B: 'b1' }), true);
+  assert.deepEqual(Object.assign({}, ctx.LMCore.combos.previewVariation(ctx.LMState.combo, ctx.LMState.docData.categories)), { A: 'a0', B: 'b1' });
+  ctx.LMUI.layers.setInCurrent([1], true);
+  assert.equal(on({ A: 'a0', B: 'b1' }), true);
+});
+
+test('"선택 레이어를 모든 조합에 넣기" puts the selection into every combo', () => {
+  const { ctx, el } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', ['a0', 'a1'])], combos: [], layers: [L(1, null), L(2, null)] });
+  ctx.LMState.selectedIds = [1, 2];
+  const e = el(900);
+  ctx.LMUI.layers.render(e);
+  assert.match(e.innerHTML, /data-action="add-selected-all"/);
+  ctx.LMUI.layers.addToAll([1, 2]);
+  for (const v of [{ A: 'a0' }, { A: 'a1' }]) assert.deepEqual(arr(ctx.LMCore.combos.onLayerIds(ctx.LMState.docData.combos, v)), [1, 2]);
+});
+
+test('a category without values: no checkboxes, a hint instead', () => {
+  const { ctx, el } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', ['a0']), cat('E', [])], combos: [], layers: [L(1, null)] });
+  const e = el(900);
+  ctx.LMUI.layers.render(e);
+  assert.doesNotMatch(e.innerHTML, /class="cb /);
+  assert.match(e.innerHTML, /값이 없는 카테고리/);
+});

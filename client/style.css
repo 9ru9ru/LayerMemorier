@@ -44,8 +44,6 @@ input[type=checkbox] { width: auto; }
 .layer-row .cb:hover { border-color: #ccc; }
 .layer-row .cb.checked { background: #4a90e2; border-color: #4a90e2; }
 .layer-row .cb.checked::after { content: ''; position: absolute; left: 3px; top: 0; width: 4px; height: 8px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
-.layer-row .cb.inherited { border-style: dashed; border-color: #4a90e2; background: rgba(74, 144, 226, .2); }
-.layer-row .cb.inherited::after { content: ''; position: absolute; left: 3px; top: 0; width: 4px; height: 8px; border: solid #7fb0ea; border-width: 0 2px 2px 0; transform: rotate(45deg); opacity: .7; }
 /* 고정 영역 + 트리만 스크롤 (combos spec §6.2) */
 main.fill { overflow: hidden; display: flex; flex-direction: column; }
 main.fill > .tab.active { flex: 1; min-height: 0; display: flex; flex-direction: column; }

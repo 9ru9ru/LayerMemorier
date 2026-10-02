@@ -109,6 +109,42 @@
     return compact(out);
   }
 
+  // 레이어 탭 조합 선택("전체" 없음): 카테고리마다 구체적인 값. 맞는 값은 두고, 없거나 낡았으면 첫 값.
+  // 값이 하나도 없는 카테고리는 비워 둔다 (previewVariation이 null을 돌려 "고를 수 없음"이 된다).
+  function fillCombo(when, categories) {
+    const out = {};
+    for (const c of categories) {
+      if (!c.values.length) continue;
+      out[c.id] = has(when, c.id) && c.values.some(v => v.id === when[c.id]) ? when[c.id] : c.values[0].id;
+    }
+    return out;
+  }
+
+  // variation(모든 카테고리 값이 정해진 조합)에서만 layerIds를 끈다. 그 배리에이션에 맞는 더 넓은 항목
+  // (예: 모든 조합)에 들어 있으면 그 항목에서 빼고, "그 항목 − 이 배리에이션"을 덮는 항목들에 다시 넣는다.
+  // 덮는 항목: 정해지지 않은 카테고리를 차례로 보며, 앞 카테고리는 이 배리에이션 값으로 고정하고 이 카테고리는 다른 값.
+  function removeFromVariation(combos, categories, variation, layerIds) {
+    const drop = new Set(layerIds);
+    let out = combos.map(c => ({ when: c.when, layers: c.layers.slice() }));
+    const readd = [];
+    for (const c of out) {
+      if (!matches(c.when, variation)) continue;
+      const hit = c.layers.filter(id => drop.has(id));
+      if (!hit.length) continue;
+      c.layers = c.layers.filter(id => !drop.has(id));
+      const fixed = Object.assign({}, c.when);
+      for (const cat of categories) {
+        if (has(c.when, cat.id)) continue;
+        for (const v of cat.values) {
+          if (v.id !== variation[cat.id]) readd.push({ when: Object.assign({}, fixed, { [cat.id]: v.id }), ids: hit });
+        }
+        fixed[cat.id] = variation[cat.id];
+      }
+    }
+    for (const r of readd) out = toggle(out, r.when, r.ids, true);
+    return compact(out);
+  }
+
   function removeLayers(combos, layerIds) {
     const drop = new Set(layerIds);
     return compact(combos.map(c => ({ when: c.when, layers: c.layers.filter(id => !drop.has(id)) })));
@@ -242,7 +278,7 @@
 
   return {
     matches, covers, sameWhen, onLayerIds, visibleLayerIds, withDescendants, unusedLayerIds, layerSignature, managedLayerIds, orphanLayerIds, pruneOrphans,
-    toggle, removeLayers, countWithLayers, removeFor, countFor, layerState,
+    toggle, fillCombo, removeFromVariation, removeLayers, countWithLayers, removeFor, countFor, layerState,
     isStale, cleanWhen, comboName, sortCombos, combosOfLayer, previewVariation, migrate,
   };
 });
