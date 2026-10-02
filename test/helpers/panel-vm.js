@@ -40,6 +40,7 @@ function scriptOrder() {
 function loadPanel(opts = {}) {
   const ctx = vm.createContext({ console, setTimeout, clearTimeout, Promise, Date, Map, Set, JSON, Math });
   ctx.window = ctx;
+  ctx.addEventListener = () => {};
   ctx.self = ctx;
   ctx.localStorage = opts.storage === 'throw' ? throwingStorage() : memoryStorage();
   ctx.document = {

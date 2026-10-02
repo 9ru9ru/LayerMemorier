@@ -198,6 +198,8 @@ LMUI.export = (() => {
       LMState.progress = null;
       try { LMExportDefaults.save(output); } catch (e) { LMApp.status(e.message); }
       try { await LMApp.refresh(); } catch (e) { LMApp.status(e.message); }
+      // 내보내는 동안 미뤄 둔 패널 미리보기를 다시 맞춘다 (캐시에 있으면 바로).
+      LMPanelPreview.request(false);
     }
   }
 

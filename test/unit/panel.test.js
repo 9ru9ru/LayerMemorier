@@ -75,3 +75,121 @@ test('export begins with every layer id so the whole document is restored afterw
   const job = calls.find(c => c[0] === 'exportOne')[1];
   assert.deepEqual([arr(job.on), arr(job.off)], [[1, 3], [4]]);
 });
+
+// ---- 패널 미리보기 (independent preview spec §4.2·§4.4) ----
+
+test('layer tab renders without the preview pane when the toggle is off (default)', () => {
+  const { ctx, el } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [], layers: [L(1, null)] });
+  const e = el(900);
+  ctx.LMUI.layers.render(e);
+  assert.doesNotMatch(e.innerHTML, /pv-pane/);
+  assert.match(e.innerHTML, /패널 미리보기/);
+});
+
+test('layer tab still renders the pane when localStorage throws', () => {
+  const { ctx, el } = loadPanel({ storage: 'throw' });
+  setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [], layers: [L(1, null)] });
+  ctx.LMHost.call = async () => ({ path: 'C:/t/p.png', width: 1, height: 1, ms: 1 });
+  ctx.LMPanelPreview.setOn(true);
+  const e = el(900);
+  ctx.LMUI.layers.render(e);
+  assert.match(e.innerHTML, /pv-pane/);
+  assert.match(e.innerHTML, /lm-split"/);
+});
+
+test('a narrow layer tab stacks the pane above the list', () => {
+  const { ctx, el } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [], layers: [L(1, null)] });
+  ctx.LMHost.call = async () => ({ path: 'C:/t/p.png', width: 1, height: 1, ms: 1 });
+  ctx.LMPanelPreview.setOn(true);
+  const e = el(400, 700);
+  ctx.LMUI.layers.render(e);
+  assert.match(e.innerHTML, /lm-split stack/);
+});
+
+test('turning the panel preview on renders once, then serves the same combo from cache', async () => {
+  const { ctx } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', ['a0', 'a1'])], combos: [{ when: { A: 'a1' }, layers: [2] }], layers: [L(1, null), L(2, null)] });
+  const calls = [];
+  ctx.LMHost.call = async (fn, arg) => { calls.push([fn, arg]); return { path: 'C:/t/preview_' + calls.length + '.png', width: 10, height: 10, ms: 1 }; };
+  ctx.LMPanelPreview.setOn(true);
+  await ctx.LMPanelPreview.request(false);
+  ctx.LMState.combo = { A: 'a1' };
+  await ctx.LMPanelPreview.request(false);
+  ctx.LMState.combo = {};
+  await ctx.LMPanelPreview.request(false);
+  const renders = calls.filter(c => c[0] === 'renderPreview');
+  assert.equal(renders.length, 2);
+  assert.deepEqual(arr(renders[1][1].on), [2]);
+  assert.deepEqual(arr(renders[1][1].off), [1]);
+  assert.equal(renders[0][1].maxSize, 1024);
+  assert.match(ctx.LMPanelPreview.paneHtml(), /file:\/\/\/C:\/t\/preview_1\.png/);
+});
+
+test('"다시 그리기" (force) re-renders the current combo even when cached', async () => {
+  const { ctx } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [], layers: [L(1, null)] });
+  let n = 0;
+  ctx.LMHost.call = async () => ({ path: 'C:/t/p' + (++n) + '.png', width: 1, height: 1, ms: 1 });
+  ctx.LMPanelPreview.setOn(true);
+  await ctx.LMPanelPreview.request(false);
+  await ctx.LMPanelPreview.request(true);
+  assert.equal(n, 2);
+});
+
+test('the panel preview does nothing while off or while exporting', async () => {
+  const { ctx } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [], layers: [L(1, null)] });
+  let n = 0;
+  ctx.LMHost.call = async () => ({ path: 'C:/t/p' + (++n) + '.png', width: 1, height: 1, ms: 1 });
+  await ctx.LMPanelPreview.request(false);
+  assert.equal(n, 0);
+  ctx.LMPanelPreview.setOn(true);
+  ctx.LMState.exporting = true;
+  await ctx.LMPanelPreview.request(false);
+  assert.equal(n, 0);
+});
+
+test('redo-pending error shows the Korean message', async () => {
+  const { ctx } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [], layers: [L(1, null)] });
+  ctx.LMHost.call = async () => { throw new Error('renderPreview: LM_REDO_PENDING'); };
+  ctx.LMPanelPreview.setOn(true);
+  await ctx.LMPanelPreview.request(false);
+  assert.match(ctx.LMPanelPreview.paneHtml(), /다시 실행할 단계가 있어/);
+});
+
+test('a category without values shows a message instead of rendering', async () => {
+  const { ctx } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', [])], combos: [], layers: [L(1, null)] });
+  let n = 0;
+  ctx.LMHost.call = async () => { n++; return {}; };
+  ctx.LMPanelPreview.setOn(true);
+  await ctx.LMPanelPreview.request(false);
+  assert.equal(n, 0);
+  assert.match(ctx.LMPanelPreview.paneHtml(), /값이 없는 카테고리가 있어/);
+});
+
+test('refresh with the same layer structure does not re-render; a structure change does', async () => {
+  const { ctx } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [], layers: [L(1, null)] });
+  let n = 0;
+  ctx.LMHost.call = async () => ({ path: 'C:/t/p' + (++n) + '.png', width: 1, height: 1, ms: 1 });
+  ctx.LMPanelPreview.setOn(true);
+  await ctx.LMPanelPreview.onRefresh(true);
+  await ctx.LMPanelPreview.onRefresh(false);
+  assert.equal(n, 1);
+  ctx.LMState.layers = [L(1, null), L(2, null)];
+  await ctx.LMPanelPreview.onRefresh(false);
+  assert.equal(n, 2);
+});
+
+test('the toggle and split ratio are remembered in localStorage', () => {
+  const first = loadPanel();
+  first.ctx.LMPanelPreview.setOn(true);
+  first.ctx.LMPanelPreview.setRatio(0.55);
+  assert.equal(first.ctx.localStorage.getItem('lm.panelPreview'), '1');
+  assert.equal(first.ctx.localStorage.getItem('lm.previewSplit'), '0.55');
+  assert.equal(first.ctx.LMPanelPreview.ratio(), 0.55);
+});

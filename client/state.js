@@ -105,6 +105,8 @@ const LMApp = {
       if (fresh && key && LMState.previews[key]) LMState.combo = Object.assign({}, LMState.previews[key].combo);
       // 조합 선택(미리보기 기억에서 되돌린 것 포함)에 지금 없는 카테고리·값 키가 남지 않게 한다.
       if (docData) LMState.combo = LMCore.combos.cleanWhen(LMState.combo, docData.categories);
+      // 패널 미리보기: 문서·레이어 구조가 바뀐 경우만 다시 그린다 (independent preview spec §4.4).
+      LMPanelPreview.onRefresh(fresh);
       this.status(notice);
     } catch (e) {
       this.status(e.message);
