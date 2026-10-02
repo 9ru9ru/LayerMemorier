@@ -6,7 +6,9 @@ const CELL = {
   GA: [1, 1, [255, 128, 0]], GB: [2, 1, [128, 0, 255]], H: [3, 1, [0, 0, 0]], BG: [4, 1, [255, 255, 255]],
 };
 
-// fixture 문서 데이터(조합)로 배리에이션 v 에서 그 칸이 보이는가. G 그룹(A1)이 꺼지면 GA·GB 도 안 보인다.
+// fixture 문서 데이터(조합)로 배리에이션 v 에서 그 칸이 보이는가 (independent preview spec §3.1).
+// 체크한 레이어 + 그 부모 그룹만 켜진다: GA(B0)가 켜지면 부모 G 도 켜지고, G(A1)만 켜진 경우 안의 GB 는 꺼진 채다.
+// 어느 조합에도 없는 BG·H 는 PSD 눈 상태와 상관없이 꺼진다.
 function expectedOn(name, v) {
   switch (name) {
     case 'A0': return v.cA === 'a0';
@@ -16,10 +18,10 @@ function expectedOn(name, v) {
     case 'B2': return v.cB === 'b2';
     case 'N1': return v.cN === 'n1';
     case 'N2': return v.cN === 'n2';
-    case 'GA': return v.cA === 'a1' && v.cB === 'b0';
-    case 'GB': return v.cA === 'a1';
+    case 'GA': return v.cB === 'b0';
+    case 'GB': return false;
     case 'H': return false;
-    case 'BG': return true;
+    case 'BG': return false;
   }
   throw new Error(name);
 }

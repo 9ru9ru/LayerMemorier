@@ -607,8 +607,9 @@ test('layer tab: Photoshop preview applies the combo, follows changes, restores 
     for (const [name, on] of Object.entries({ A0: false, A1: true, G: true, B0: true, GA: true, B1: false, B2: false, N1: true, N2: false })) {
       assert.equal(v[name], on, 'A1_B0_N1 ' + name);
     }
-    assert.equal(v.H, true, '관리 아닌 레이어는 그대로');
-    assert.equal(v.BG, true);
+    assert.equal(v.H, false, '어느 조합에도 없는 레이어는 PSD 눈과 상관없이 꺼진다');
+    assert.equal(v.BG, false);
+    assert.equal(v.GB, false, 'G(A1)만 체크돼 있으면 안의 GB 는 꺼진 채');
     assert.match(await p.eval(`document.querySelector('#tab-layers .preview-label').textContent`), /A1_B0_N1로 표시 중/);
 
     // 조합을 바꾸면 다시 반영된다.
@@ -639,7 +640,7 @@ test('layer tab: Photoshop preview applies the combo, follows changes, restores 
     assert.equal(await p.eval('LMPreview.isOn()'), true);
     assert.deepEqual(await p.eval('LMState.combo'), { cA: 'a1', cB: 'b0', cN: 'n2' }, '캔버스에 반영된 조합으로 선택이 돌아온다');
 
-    // 미리보기 중 손으로: 관리 아닌 BG 를 끄고, 관리 레이어 N2 를 지운다.
+    // 미리보기 중 손으로: BG 를 끄고, N2 를 지운다.
     psCall('applyVisibility', { on: [], off: [byName.BG] });
     psRun(`app.activeDocument.artLayers.getByName('N2').remove(); "removed"`);
     await new Promise(r => setTimeout(r, 1000));
@@ -648,9 +649,9 @@ test('layer tab: Photoshop preview applies the combo, follows changes, restores 
     await settle();
     assert.equal(await p.eval(`document.getElementById('status').textContent`), '', '지워진 레이어가 있어도 오류 없음');
     const after = vis();
-    const expected = Object.assign({}, before, { BG: false });
+    const expected = Object.assign({}, before);
     delete expected.N2;
-    assert.deepEqual(after, expected, '건드린 레이어만 원래대로, 손으로 바꾼 관리 아닌 레이어는 그대로');
+    assert.deepEqual(after, expected, '미리보기는 모든 레이어를 건드리므로 전부 켜기 전 상태로 돌아온다');
     assert.equal(await p.eval('LMPreview.isOn()'), false);
 
     // 문서를 닫으면 스냅샷도 버린다.
@@ -956,11 +957,11 @@ test('export tab: run-only values, always-excluded combos and warnings are colla
     const det = name => p.eval(`(() => { const d = document.querySelector('#tab-export details[data-open=${name}]'); return d ? { open: d.open, text: d.querySelector('summary').textContent } : null; })()`);
     assert.deepEqual(await det('include'), { open: false, text: '이번만 내보낼 값 (저장 안 됨)' });
     assert.deepEqual(await det('exclude'), { open: false, text: '항상 뺄 조합 (PSD에 저장)' });
-    assert.equal(await det('warnings'), null, 'no warnings, no box');
+    assert.deepEqual(await det('warnings'), { open: false, text: '경고 1개' }, 'BG, H, GB 는 어느 조합에도 없다 (unused)');
     await p.eval(`document.querySelector('#tab-export .include input[data-category=cN][data-value=n1]').click(); true`);
     assert.equal((await det('include')).open, true, 'opens once a value is unchecked');
     await p.eval(`LMState.docData.combos.push({ when: { cA: 'a0' }, layers: [999999] }); LMApp.render(); true`);
-    assert.deepEqual(await det('warnings'), { open: false, text: '경고 1개' });
+    assert.deepEqual(await det('warnings'), { open: false, text: '경고 2개' });
     for (const [label, w, h] of [['export-520', 520, 760], ['export-900', 900, 760]]) {
       await p.emulate(w, h);
       await p.eval('LMApp.render(); true');
