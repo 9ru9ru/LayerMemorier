@@ -116,12 +116,15 @@ LMUI.layers = (() => {
   }
 
   // 조합 선택이나 조합 데이터가 바뀐 뒤: 먼저 그리고, 미리보기가 켜져 있으면 반영한 뒤 눈 아이콘을 다시 그린다.
+  // 패널 미리보기는 캔버스 반영 뒤에: 호스트 호출은 차례로 처리되므로, 먼저 부르면 빠른 캔버스 반영이
+  // 몇 초 걸리는 그리기 뒤에서 기다린다 (#2).
   async function afterComboChange() {
     LMApp.render();
+    if (LMPreview.isOn()) {
+      await LMPreview.apply();
+      LMApp.render();
+    }
     LMPanelPreview.request(false);
-    if (!LMPreview.isOn()) return;
-    await LMPreview.apply();
-    LMApp.render();
   }
 
   // ---- 조작 ----
