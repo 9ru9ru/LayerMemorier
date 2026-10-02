@@ -8,8 +8,10 @@ const vm = require('vm');
 const HOST = path.join(__dirname, '../../host/host.jsx');
 
 function loadHost(opts = {}) {
-  const o = Object.assign({ width: 1000, height: 1000, history: { index: 5, count: 5 }, failSave: false }, opts);
-  const ps = { log: [], files: new Set(), folders: new Set(), closedDuplicates: 0, history: o.history };
+  // history.states: 히스토리 패널 항목 이름, history.index: 현재 항목(0부터). 그 뒤 항목은 Redo(흐린) 단계다.
+  const o = Object.assign({ width: 1000, height: 1000, history: null, failSave: false, failDelete: false }, opts);
+  const history = o.history || { states: ['Open', 'Brush', 'Brush', 'Move', 'Brush'], index: 4 };
+  const ps = { log: [], files: new Set(), folders: new Set(), closedDuplicates: 0, history };
 
   class Store {
     constructor() { this.data = {}; this.refs = []; }
@@ -34,15 +36,18 @@ function loadHost(opts = {}) {
     return { name, width: unit(w), height: unit(h) };
   }
 
-  const savedState = { name: 'Open' };
-  let state = savedState;
+  // 포토샵처럼: 앞 단계를 고르면 뒤 단계는 Redo로 남고, 새 단계를 만들면 Redo 단계는 지워진다.
   const doc = makeDoc('a.psb', o.width, o.height);
   doc.fullName = { fsName: 'C:\\art\\a.psb' };
   Object.defineProperty(doc, 'activeHistoryState', {
-    get: () => state,
-    set: v => { ps.log.push(['historyState', v]); state = v; },
+    get: () => ({ index: history.index, name: history.states[history.index] }),
+    set: v => { ps.log.push(['historyState', v.index]); history.index = v.index; },
   });
-  doc.suspendHistory = (name, script) => { vm.runInContext(script, ctx); state = { name }; };
+  doc.suspendHistory = (name, script) => {
+    vm.runInContext(script, ctx);
+    history.states = history.states.slice(0, history.index + 1).concat(name);
+    history.index = history.states.length - 1;
+  };
   doc.duplicate = (name) => {
     const dup = makeDoc(name, o.width, o.height);
     dup.resizeImage = (w, h) => { dup.width = unit(w.value); dup.height = unit(h.value); ps.log.push(['resize', w.value, h.value]); };
@@ -63,6 +68,13 @@ function loadHost(opts = {}) {
 
   function executeAction(id, desc) {
     ps.log.push([id, desc]);
+    if (id === 'Dlt ' && desc.data.null && desc.data.null.refs.some(r => r[0] === 'HstS')) {
+      if (o.failDelete) throw new Error('delete failed (stub)');
+      // 현재 항목과 그 뒤를 지운다 (비선형 히스토리 꺼짐). 앞 항목이 현재가 된다.
+      history.states = history.states.slice(0, history.index);
+      history.index = history.states.length - 1;
+      return;
+    }
     if (id === 'Expr') {
       if (o.failSave) throw new Error('save failed (stub)');
       ps.files.add(desc.data.Usng.data['In  '].fsName);
@@ -70,8 +82,15 @@ function loadHost(opts = {}) {
   }
 
   function executeActionGet(ref) {
-    if (ref.refs.some(r => r[0] === 'HstS')) {
-      return { getInteger: k => (k === 'ItmI' ? ps.history.index : ps.history.count) };
+    const h = ref.refs.find(r => r[0] === 'HstS');
+    if (h) {
+      // ItmI는 1부터. putIndex 참조면 그 항목, 아니면 현재 항목.
+      const i = typeof h[1] === 'number' ? h[1] - 1 : history.index;
+      if (!(i in history.states)) throw new Error('no such history state ' + (i + 1));
+      return {
+        getInteger: k => (k === 'ItmI' ? i + 1 : history.states.length),
+        getString: () => history.states[i],
+      };
     }
     throw new Error('executeActionGet: not stubbed ' + JSON.stringify(ref.refs));
   }
@@ -103,7 +122,7 @@ function loadHost(opts = {}) {
   vm.runInContext(fs.readFileSync(HOST, 'utf8'), ctx, { filename: 'host.jsx' });
   ps.doc = doc;
   ps.docRef = { name: 'a.psb', path: 'C:\\art\\a.psb' };
-  ps.savedState = savedState;
+  ps.before = { states: history.states.slice(), index: history.index };
   return { LM: ctx.LM, ps };
 }
 
