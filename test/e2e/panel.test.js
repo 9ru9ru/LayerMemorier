@@ -439,13 +439,20 @@ test('layer tab: picking a combo shows its layers, checkbox writes combos to XMP
     await p.eval(pickCombo('cB', 'b0'));
     assert.equal(await p.eval(cbState(byName.A0)), 'checked');
 
-    // 선택 레이어를 모든 조합에 넣기
-    await p.eval(clickRow(byName.H));
+    // 조합 복사 → 다른 조합에 붙여넣기 = 똑같아진다 (확인창은 스텁).
+    await stubDialogs(p);
+    await p.eval(`window.__confirmResult = true; true`);
+    assert.equal(await p.eval(`document.querySelector('[data-action=combo-paste]').disabled`), true, 'nothing copied yet');
+    await p.eval(`document.querySelector('[data-action=combo-copy]').click(); true`);
+    const copied = onLayerIds(psCall('readDocData').combos, { cA: 'a0', cB: 'b0', cN: 'n1' });
+    await p.eval(pickCombo('cA', 'a1'));
+    await p.eval(pickCombo('cB', 'b1'));
+    await p.eval(`document.querySelector('[data-action=combo-paste]').click(); true`);
     await settle();
-    await p.eval(`document.querySelector('[data-action=add-selected-all]').click(); true`);
-    await settle();
-    assert.deepEqual(entryOf(psCall('readDocData').combos, {}).layers, [byName.H]);
-    assert.equal(await p.eval(cbState(byName.H)), 'checked');
+    const pasted = psCall('readDocData').combos;
+    assert.deepEqual(onLayerIds(pasted, { cA: 'a1', cB: 'b1', cN: 'n1' }), copied);
+    assert.deepEqual(onLayerIds(pasted, { cA: 'a1', cB: 'b1', cN: 'n2' }), onLayerIds(combos, { cA: 'a1', cB: 'b1', cN: 'n2' }), 'other combos untouched');
+    await restoreDialogs(p);
 
     assert.deepEqual(psCall('getLayers').map(l => [l.name, l.color]), colorsBefore, '레이어 색은 바뀌지 않는다');
   } finally {
@@ -453,7 +460,7 @@ test('layer tab: picking a combo shows its layers, checkbox writes combos to XMP
   }
 });
 
-test('layer tab: Shift/Ctrl selection, checkbox on a selected row applies to all selected, remove from all combos', async () => {
+test('layer tab: Shift/Ctrl selection, checkbox on a selected row applies to all selected', async () => {
   const { byName } = buildFixture();
   psCall('writeDocData', docDataFor(byName));
   const p = await freshPanel();
@@ -487,22 +494,7 @@ test('layer tab: Shift/Ctrl selection, checkbox on a selected row applies to all
     assert.deepEqual(asc(entryOf(psCall('readDocData').combos, { cA: 'a1', cB: 'b1', cN: 'n1' }).layers), asc(picked.concat(byName.H)));
     assert.deepEqual(asc(await p.eval('LMState.selectedIds')), picked);
 
-    // 모든 조합에서 빼기: B0(B0 항목·A1_B1_N1), B2(B2·A1_B1_N1), N1(N1·A1_B1_N1) → 조합 4개
-    await p.eval(`window.__confirmResult = false; window.__dialogs = []; true`);
-    await p.eval(`document.querySelector('[data-action=remove-selected]').click(); true`);
-    await settle();
-    assert.match(await p.eval('window.__dialogs[0][1]'), /레이어 3개를 조합 4개에서 뺍니다/);
-    assert.ok(entryOf(psCall('readDocData').combos, { cN: 'n1' }), '취소하면 그대로');
-
-    await p.eval(`window.__confirmResult = true; true`);
-    await p.eval(`document.querySelector('[data-action=remove-selected]').click(); true`);
-    await settle();
-    const combos = psCall('readDocData').combos;
-    for (const id of picked) assert.equal(combos.some(c => c.layers.includes(id)), false, 'layer ' + id);
-    assert.deepEqual(entryOf(combos, { cA: 'a1', cB: 'b1', cN: 'n1' }).layers, [byName.H]);
-    assert.deepEqual(entryOf(combos, { cB: 'b0' }).layers, [byName.GA]);
-    assert.equal(entryOf(combos, { cN: 'n1' }), undefined, '빈 항목은 사라진다');
-    assert.equal(await p.eval(`document.querySelector('[data-action=remove-selected]').disabled`), true, '더 뺄 조합이 없다');
+    assert.equal(await p.eval(`document.querySelector('[data-action=remove-selected], [data-action=add-selected-all]')`), null, '"모든 조합에 넣기/빼기" 버튼은 없다');
   } finally {
     await restoreDialogs(p).catch(() => {});
     p.close();
