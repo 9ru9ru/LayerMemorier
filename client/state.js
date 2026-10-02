@@ -126,7 +126,8 @@ const LMApp = {
     // 다시 그리는 경우에만 위치를 되돌린다. 내용이 짧아졌으면 브라우저가 최대치로
     // 알아서 잘라 주므로 따로 계산하지 않는다.
     const main = document.querySelector('main');
-    const keep = LMState.renderedTab === LMState.tab ? main.scrollTop : 0;
+    const switched = LMState.renderedTab !== LMState.tab;
+    const keep = switched ? 0 : main.scrollTop;
     document.getElementById('doc-name').textContent = LMState.docInfo ? LMState.docInfo.name : '문서 없음';
     document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === LMState.tab));
     document.querySelectorAll('main .tab').forEach(s => s.classList.toggle('active', s.id === 'tab-' + LMState.tab));
@@ -137,6 +138,8 @@ const LMApp = {
     else LMUI[LMState.tab].render(el);
     LMState.renderedTab = LMState.tab;
     main.scrollTop = keep;
+    // 다른 탭에 있는 동안 미뤄 둔 패널 미리보기를 맞춘다 (캐시에 있으면 바로, #6).
+    if (switched && LMState.tab === 'layers') LMPanelPreview.request(false);
   },
 };
 

@@ -49,7 +49,7 @@ const LMPanelPreview = (() => {
     const all = LMState.layers.map(l => l.id);
     const on = all.filter(id => visible.has(id));
     // 같은 레이어 구조에서 그림은 켜진 레이어로 정해진다 (구조가 바뀌면 onRefresh가 캐시를 비운다).
-    return { on, off: all.filter(id => !visible.has(id)), key: on.join(','), label: LMCore.combos.comboName(v, d.categories) };
+    return { on, off: all.filter(id => !visible.has(id)), key: on.join(','), label: LMCore.combos.comboName(v, d.categories), docKey: LMState.docKey };
   }
 
   function show(path, label) {
@@ -60,8 +60,9 @@ const LMPanelPreview = (() => {
   }
 
   // 지금 조합을 보여 준다. 캐시에 있으면 바로, 없으면 그리기를 예약한다 (마지막 요청만).
+  // 레이어 탭이 안 보이면 그리지 않는다. 레이어 탭으로 돌아올 때 LMApp.render가 다시 부른다 (#6).
   function request(force) {
-    if (!isOn() || !LMState.docData || LMState.exporting) return Promise.resolve();
+    if (!isOn() || !LMState.docData || LMState.exporting || LMState.tab !== 'layers') return Promise.resolve();
     const t = target();
     if (!t) {
       wanted = null;
@@ -93,10 +94,12 @@ const LMPanelPreview = (() => {
     LMState.previewing = true;
     try {
       const r = await LMHost.call('renderPreview', { doc, on: t.on, off: t.off, maxSize: MAX_SIZE });
+      // 그리는 사이 문서가 바뀌었으면 버린다. 레이어 id는 문서마다 겹쳐 같은 캐시 키가 될 수 있다 (#3).
+      if (t.docKey !== LMState.docKey) return;
       cache.set(t.key, r.path);
       if (t.key === wanted) { state.path = r.path; state.error = ''; }
     } catch (e) {
-      if (t.key === wanted) state.error = message(e);
+      if (t.key === wanted && t.docKey === LMState.docKey) state.error = message(e);
     } finally {
       LMState.previewing = false;
       LMState.previewQuietUntil = Date.now() + 500;

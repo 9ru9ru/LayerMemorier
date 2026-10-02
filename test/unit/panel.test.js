@@ -10,6 +10,8 @@ function setupDoc(ctx, { categories, combos, layers }) {
   ctx.LMState.docData = Object.assign(ctx.LMApp.newDocData('a'), { categories, combos });
   ctx.LMState.docData.output = ctx.LMCore.output.normalize(undefined);
   ctx.LMState.layers = layers;
+  ctx.LMState.tab = 'layers'; // 패널 미리보기는 레이어 탭이 보일 때만 그린다 (#6)
+  ctx.LMState.renderedTab = 'layers'; // 이미 레이어 탭을 보고 있는 상태
 }
 const L = (id, parentId, kind = 'layer') => ({ id, name: 'L' + id, kind, visible: true, depth: parentId == null ? 0 : 1, parentId, color: 'none' });
 // vm 안에서 만든 배열은 프로토타입이 달라 deepStrictEqual이 거부한다. 이 realm의 배열로 바꿔 비교한다.
@@ -235,4 +237,58 @@ test('while a render runs, host document events are ignored (and for a short whi
   assert.equal(ctx.LMApp.ignoreHostEvents(), true, 'events from closing the duplicate arrive after the call returns');
   ctx.LMState.previewQuietUntil = Date.now() - 1;
   assert.equal(ctx.LMApp.ignoreHostEvents(), false);
+});
+
+// ---- 이슈 #2 · #3 · #6 ----
+
+test('#2 with both previews on, the canvas is updated before the panel picture is rendered', async () => {
+  const { ctx } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [{ when: {}, layers: [1] }], layers: [L(1, null), L(2, null)] });
+  const order = [];
+  ctx.LMHost.call = async fn => { order.push(fn); return fn === 'renderPreview' ? { path: 'C:/t/p.png', width: 1, height: 1, ms: 1 } : { ok: true }; };
+  ctx.LMState.previews['C:/a.psd'] = { snapshot: {}, touched: [], combo: {} };
+  ctx.LMPanelPreview.setOn(true);
+  await ctx.LMUI.layers.afterComboChange();
+  await new Promise(r => setTimeout(r, 0));
+  assert.deepEqual(order, ['applyVisibility', 'renderPreview']);
+});
+
+test('#3 a render that finishes after a document switch is not cached for the new document', async () => {
+  const { ctx } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [], layers: [L(1, null)] });
+  let release;
+  let n = 0;
+  ctx.LMHost.call = async () => {
+    n++;
+    if (n === 1) await new Promise(r => { release = r; });
+    return { path: 'C:/t/p' + n + '.png', width: 1, height: 1, ms: 1 };
+  };
+  ctx.LMPanelPreview.setOn(true);
+  const first = ctx.LMPanelPreview.request(false);   // 문서 a 를 그리는 중
+  ctx.LMState.docInfo = { name: 'b.psd', path: 'C:/b.psd' };
+  ctx.LMState.docKey = 'C:/b.psd';                   // 같은 레이어 id 구조의 다른 문서
+  ctx.LMPanelPreview.onRefresh(true);
+  release();
+  await first;
+  assert.doesNotMatch(ctx.LMPanelPreview.paneHtml(), /p1\.png/, 'old document picture is not shown');
+  await ctx.LMPanelPreview.request(false);
+  assert.equal(n, 2, 'the new document is rendered, not served from the old cache');
+});
+
+test('#6 nothing is rendered while another tab is shown; switching to the layer tab catches up', async () => {
+  const { ctx } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [], layers: [L(1, null)] });
+  let n = 0;
+  ctx.LMHost.call = async fn => { if (fn === 'renderPreview') n++; return { path: 'C:/t/p' + n + '.png', width: 1, height: 1, ms: 1 }; };
+  ctx.LMPanelPreview.setOn(true);
+  ctx.LMState.tab = 'export';
+  ctx.LMState.renderedTab = 'export';
+  await ctx.LMPanelPreview.onRefresh(true);
+  ctx.LMState.layers = [L(1, null), L(2, null)];
+  await ctx.LMPanelPreview.onRefresh(false);
+  assert.equal(n, 0);
+  ctx.LMState.tab = 'layers';
+  ctx.LMApp.render();
+  await new Promise(r => setTimeout(r, 0));
+  assert.equal(n, 1);
 });
