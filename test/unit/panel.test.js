@@ -462,3 +462,19 @@ test('reset asks first; cancel keeps everything, confirm clears only the layer o
   assert.equal(ctx.LMState.docData.categories.length, 1, 'categories stay');
   assert.equal(ctx.LMState.docData.excluded.length, 1, 'export settings stay');
 });
+
+test('paste applies right away without a confirm dialog and reports what changed', async () => {
+  const { ctx } = loadPanel();
+  copyPasteDoc(ctx);
+  ctx.LMApp.saveDocData = async () => {};
+  ctx.LMHost.call = async () => ({ ok: true });
+  ctx.confirm = () => { throw new Error('no confirm on paste'); };
+  ctx.LMState.combo = { A: 'a0', B: 'b0' };
+  ctx.LMUI.layers.copyCombo();
+  ctx.LMState.combo = { A: 'a1', B: 'b1' };
+  const statuses = [];
+  ctx.LMApp.status = m => statuses.push(m);
+  await ctx.LMUI.layers.pasteFromClipboard();
+  assert.deepEqual(onIn(ctx, { A: 'a1', B: 'b1' }), [1, 2]);
+  assert.match(statuses.join('\n'), /Aa1_Bb1에 붙여넣었습니다 \(켜짐 1개, 꺼짐 1개\)/);
+});

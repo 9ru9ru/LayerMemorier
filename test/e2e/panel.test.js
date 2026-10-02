@@ -439,9 +439,9 @@ test('layer tab: picking a combo shows its layers, checkbox writes combos to XMP
     await p.eval(pickCombo('cB', 'b0'));
     assert.equal(await p.eval(cbState(byName.A0)), 'checked');
 
-    // 조합 복사 → 다른 조합에 붙여넣기 = 똑같아진다 (확인창은 스텁).
+    // 조합 복사 → 다른 조합에 붙여넣기 = 똑같아진다 (확인창 없음: 떠 있으면 스텁이 기록한다).
     await stubDialogs(p);
-    await p.eval(`window.__confirmResult = true; true`);
+    await p.eval(`window.__dialogs = []; true`);
     assert.equal(await p.eval(`document.querySelector('[data-action=combo-paste]').disabled`), true, 'nothing copied yet');
     await p.eval(`document.querySelector('[data-action=combo-copy]').click(); true`);
     const copied = onLayerIds(psCall('readDocData').combos, { cA: 'a0', cB: 'b0', cN: 'n1' });
@@ -452,6 +452,7 @@ test('layer tab: picking a combo shows its layers, checkbox writes combos to XMP
     const pasted = psCall('readDocData').combos;
     assert.deepEqual(onLayerIds(pasted, { cA: 'a1', cB: 'b1', cN: 'n1' }), copied);
     assert.deepEqual(onLayerIds(pasted, { cA: 'a1', cB: 'b1', cN: 'n2' }), onLayerIds(combos, { cA: 'a1', cB: 'b1', cN: 'n2' }), 'other combos untouched');
+    assert.deepEqual(await p.eval('window.__dialogs'), [], 'paste asks nothing');
     await restoreDialogs(p);
 
     assert.deepEqual(psCall('getLayers').map(l => [l.name, l.color]), colorsBefore, '레이어 색은 바뀌지 않는다');
