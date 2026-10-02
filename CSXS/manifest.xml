@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<ExtensionManifest Version="9.0" ExtensionBundleId="local.layermemorier" ExtensionBundleVersion="0.4.4" ExtensionBundleName="LayerMemorier" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+<ExtensionManifest Version="9.0" ExtensionBundleId="local.layermemorier" ExtensionBundleVersion="0.4.5" ExtensionBundleName="LayerMemorier" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <ExtensionList>
-    <Extension Id="local.layermemorier.panel" Version="0.4.4"/>
+    <Extension Id="local.layermemorier.panel" Version="0.4.5"/>
   </ExtensionList>
   <ExecutionEnvironment>
     <HostList>

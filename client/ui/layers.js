@@ -219,6 +219,18 @@ LMUI.layers = (() => {
     return { on: want.filter(id => !now.includes(id)), off: now.filter(id => !want.includes(id)), want, v };
   }
 
+  // 붙여넣기 버튼: 확인창 없이 바로 적용하고, 바뀐 수를 상태줄에 알린다 (사용자 요청).
+  async function pasteFromClipboard() {
+    const plan = pastePlan();
+    if (!plan) return;
+    const name = C().comboName(plan.v, LMState.docData.categories);
+    if (!plan.on.length && !plan.off.length) return LMApp.status(`${name}은(는) 이미 복사한 조합과 같습니다`);
+    pasteCombo();
+    await LMApp.saveDocData();
+    LMApp.status(`${name}에 붙여넣었습니다 (켜짐 ${plan.on.length}개, 꺼짐 ${plan.off.length}개)`);
+    return afterComboChange();
+  }
+
   function pasteCombo() {
     const plan = pastePlan();
     if (!plan) return false;
@@ -254,17 +266,7 @@ LMUI.layers = (() => {
       LMApp.status(`조합 복사: ${LMState.comboClipboard.label} (레이어 ${LMState.comboClipboard.ids.length}개)`);
       return LMApp.render();
     }
-    if (btn.dataset.action === 'combo-paste') {
-      const plan = pastePlan();
-      if (!plan) return;
-      const name = C().comboName(plan.v, LMState.docData.categories);
-      if (!plan.on.length && !plan.off.length) return LMApp.status(`${name}은(는) 이미 복사한 조합과 같습니다`);
-      if (!confirm(`"${clipboard().label}"을(를) "${name}"에 붙여넣습니다.\n켜질 레이어 ${plan.on.length}개, 꺼질 레이어 ${plan.off.length}개. 계속할까요?`)) return;
-      pasteCombo();
-      await LMApp.saveDocData();
-      LMApp.status(`${name}에 붙여넣었습니다`);
-      return afterComboChange();
-    }
+    if (btn.dataset.action === 'combo-paste') return pasteFromClipboard();
     if (btn.dataset.action === 'pv-redraw') return LMPanelPreview.request(true);
     if (btn.dataset.action === 'orphans-clean') {
       LMState.docData.combos = C().pruneOrphans(LMState.docData.combos, LMState.layers);
@@ -333,5 +335,5 @@ LMUI.layers = (() => {
     }, 150);
   });
 
-  return { render, afterComboChange, checkboxTargets, setInCurrent, copyCombo, pastePlan, pasteCombo, resetCombos };
+  return { render, afterComboChange, checkboxTargets, setInCurrent, copyCombo, pastePlan, pasteCombo, pasteFromClipboard, resetCombos };
 })();
