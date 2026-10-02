@@ -62,7 +62,8 @@ LMUI.layers = (() => {
       const name = C().comboName(s.from, cats);
       return `<span class="cb inherited" data-from="${esc(JSON.stringify(s.from))}" title="${esc(name)}에서 켜짐 (클릭하면 이동)"></span>`;
     }
-    return `<span class="cb ${s.state}" title="${s.state === 'checked' ? '이 조합에서 켜짐 (클릭하면 빼기)' : '이 조합에 넣기'}"></span>`;
+    const deep = l.kind === 'group' ? ' · Ctrl+클릭: 하위 레이어까지' : '';
+    return `<span class="cb ${s.state}" title="${s.state === 'checked' ? '이 조합에서 켜짐 (클릭하면 빼기)' : '이 조합에 넣기'}${deep}"></span>`;
   }
 
   function row(l, cats, namesByLayer) {
@@ -135,15 +136,21 @@ LMUI.layers = (() => {
     await syncSelection();
   }
 
-  async function onCheckbox(cb, rowEl) {
+  // 체크박스 대상: 클릭한 행이 선택돼 있으면 선택 전체, 아니면 그 행.
+  // deep(Ctrl)이면 그중 그룹의 하위까지 (independent preview spec §4.3).
+  function checkboxTargets(id, deep) {
+    const selected = selectedExisting();
+    const base = selected.includes(id) ? selected : [id];
+    return deep ? C().withDescendants(LMState.layers, base) : base;
+  }
+
+  async function onCheckbox(cb, rowEl, e) {
     if (cb.classList.contains('inherited')) {
       LMState.combo = JSON.parse(cb.dataset.from);
       return afterComboChange();
     }
     LMState.combo = C().cleanWhen(LMState.combo, LMState.docData.categories);
-    const id = Number(rowEl.dataset.layer);
-    const selected = selectedExisting();
-    const targets = selected.includes(id) ? selected : [id];
+    const targets = checkboxTargets(Number(rowEl.dataset.layer), e.ctrlKey || e.metaKey);
     const on = !cb.classList.contains('checked');
     LMState.docData.combos = C().toggle(LMState.docData.combos, LMState.combo, targets, on);
     // 저장이 끝난 뒤에 다시 그린다 (categories.js commit()과 같은 이유: 클릭 삼킴 방지).
@@ -160,7 +167,7 @@ LMUI.layers = (() => {
         return LMApp.render();
       }
       const cb = e.target.closest('.cb');
-      if (cb) return onCheckbox(cb, rowEl);
+      if (cb) return onCheckbox(cb, rowEl, e);
       return onRowClick(e, rowEl);
     }
     const btn = e.target.closest('#tab-layers [data-action]');
@@ -210,5 +217,5 @@ LMUI.layers = (() => {
     onChange(e).catch(err => LMApp.status(err.message));
   });
 
-  return { render, afterComboChange };
+  return { render, afterComboChange, checkboxTargets };
 })();
