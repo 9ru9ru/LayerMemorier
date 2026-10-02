@@ -20,31 +20,29 @@ LMUI.layers = (() => {
 
   // ---- 고정 영역 ----
 
+  // 카테고리마다 구체적인 값 하나 ("전체" 없음). 체크박스·미리보기·내보내기가 모두 이 한 조합을 본다.
   function pickerBar(cats) {
     const selects = cats.map(c => {
-      const cur = LMState.combo[c.id] || '';
-      const opts = [`<option value="" ${cur === '' ? 'selected' : ''}>전체</option>`]
-        .concat(c.values.map(v => `<option value="${esc(v.id)}" ${cur === v.id ? 'selected' : ''}>${esc(v.name)}</option>`)).join('');
-      return `<label class="pick"><span class="dot" style="background:${LMColors.hex(c.color)}"></span>${esc(c.name)} <select data-combo-cat="${esc(c.id)}">${opts}</select></label>`;
+      const cur = LMState.combo[c.id];
+      const opts = c.values.length
+        ? c.values.map(v => `<option value="${esc(v.id)}" ${cur === v.id ? 'selected' : ''}>${esc(v.name)}</option>`).join('')
+        : '<option>(값 없음)</option>';
+      return `<label class="pick"><span class="dot" style="background:${LMColors.hex(c.color)}"></span>${esc(c.name)} <select data-combo-cat="${esc(c.id)}" ${c.values.length ? '' : 'disabled'}>${opts}</select></label>`;
     }).join('');
     return `<div class="row picker"><b>조합</b>${selects}</div>`;
   }
 
-  function madeBar(cats, sorted, existing) {
-    const current = sorted.find(e => C().sameWhen(e.when, LMState.combo));
-    const opts = (current ? [] : ['<option value="" selected>(새 조합)</option>']).concat(sorted.map(e => {
-      const n = e.layers.filter(id => existing.has(id)).length;
-      return `<option value="${esc(JSON.stringify(e.when))}" ${e === current ? 'selected' : ''}>${esc(C().comboName(e.when, cats))} · ${n}개</option>`;
-    })).join('');
+  function toggleBar() {
     const panel = `<label class="preview-toggle" title="레이어 탭 왼쪽에 지금 조합을 그립니다 (큰 문서는 한 번에 몇 초 걸릴 수 있음)"><input type="checkbox" class="panel-preview-switch" ${LMPanelPreview.isOn() ? 'checked' : ''}> 패널 미리보기</label>`;
-    return `<div class="row made"><label>만든 조합 <select class="made-select">${opts}</select></label>${panel}${LMPreview.toggleHtml()}</div>`;
+    return `<div class="row made">${panel}${LMPreview.toggleHtml()}</div>`;
   }
 
   function selectionBar() {
     const ids = selectedExisting();
     if (!ids.length) return '';
     const m = C().countWithLayers(LMState.docData.combos, ids);
-    return `<div class="row selbar"><b>선택 ${ids.length}개</b><button data-action="remove-selected" ${m ? '' : 'disabled'}>선택 레이어를 모든 조합에서 빼기</button></div>`;
+    return `<div class="row selbar"><b>선택 ${ids.length}개</b><button data-action="add-selected-all">선택 레이어를 모든 조합에 넣기</button>` +
+      `<button data-action="remove-selected" ${m ? '' : 'disabled'}>선택 레이어를 모든 조합에서 빼기</button></div>`;
   }
 
   function noticeBar() {
@@ -57,23 +55,20 @@ LMUI.layers = (() => {
 
   // ---- 트리 ----
 
-  function checkbox(l, cats) {
-    const s = C().layerState(LMState.docData.combos, LMState.combo, l.id);
-    if (s.state === 'inherited') {
-      const name = C().comboName(s.from, cats);
-      return `<span class="cb inherited" data-from="${esc(JSON.stringify(s.from))}" title="${esc(name)}에서 켜짐 (클릭하면 이동)"></span>`;
-    }
+  // 체크 = 지금 고른 조합에서 켜짐 (어느 항목 때문에 켜졌든). onSet이 null이면 조합을 고를 수 없는 상태.
+  function checkbox(l, onSet) {
+    const state = onSet.has(l.id) ? 'checked' : 'none';
     const deep = l.kind === 'group' ? ' · Ctrl+클릭: 하위 레이어까지' : '';
-    return `<span class="cb ${s.state}" title="${s.state === 'checked' ? '이 조합에서 켜짐 (클릭하면 빼기)' : '이 조합에 넣기'}${deep}"></span>`;
+    return `<span class="cb ${state}" title="${state === 'checked' ? '이 조합에서 켜짐 (클릭하면 이 조합에서만 빼기)' : '이 조합에 넣기'}${deep}"></span>`;
   }
 
-  function row(l, cats, namesByLayer) {
+  function row(l, onSet, namesByLayer) {
     const selected = LMState.selectedIds.includes(l.id) ? ' selected' : '';
     const caret = l.kind === 'group' ? `<span class="caret">${LMState.collapsed.has(l.id) ? '▸' : '▾'}</span>` : '<span class="caret"></span>';
     const names = namesByLayer.get(l.id);
     const list = names ? `<span class="combos" title="${esc(names.join(', '))}">${esc(names.join(', '))}</span>` : '';
     return `<div class="layer-row ${l.kind}${selected}" data-layer="${l.id}" style="padding-left:${4 + l.depth * 14}px">
-      ${caret}${cats.length ? checkbox(l, cats) : ''}<span class="eye${l.visible ? ' on' : ''}"${LMColors.layerHex(l.color) ? ` style="background:${LMColors.layerHex(l.color)}" title="포토샵 레이어 색"` : ''}>${l.visible ? '👁' : '·'}</span>
+      ${caret}${onSet ? checkbox(l, onSet) : ''}<span class="eye${l.visible ? ' on' : ''}"${LMColors.layerHex(l.color) ? ` style="background:${LMColors.layerHex(l.color)}" title="포토샵 레이어 색"` : ''}>${l.visible ? '👁' : '·'}</span>
       <span class="name">${esc(l.name)}</span>${list}</div>`;
   }
 
@@ -86,8 +81,10 @@ LMUI.layers = (() => {
     const prev = el.querySelector('.tree');
     const keep = prev ? prev.scrollTop : 0;
     const cats = LMState.docData.categories;
+    LMState.combo = C().fillCombo(LMState.combo, cats);
+    const variation = C().previewVariation(LMState.combo, cats);
+    const onSet = cats.length && variation ? new Set(C().onLayerIds(LMState.docData.combos, variation)) : null;
     const sorted = C().sortCombos(LMState.docData.combos, cats);
-    const existing = new Set(LMState.layers.map(l => l.id));
     // 행마다 조합 목록을 다시 정렬하지 않도록 한 번에 모은다 (레이어 수백 개 대비).
     const namesByLayer = new Map();
     for (const e of sorted) {
@@ -97,10 +94,11 @@ LMUI.layers = (() => {
         namesByLayer.get(id).push(name);
       }
     }
+    const noValues = cats.length && !variation ? '<p class="hint">값이 없는 카테고리가 있어 조합을 고를 수 없습니다. 카테고리 탭에서 값을 추가하세요.</p>' : '';
     const bar = cats.length
-      ? pickerBar(cats) + madeBar(cats, sorted, existing) + selectionBar() + noticeBar()
+      ? pickerBar(cats) + noValues + toggleBar() + selectionBar() + noticeBar()
       : '<p class="hint">카테고리 탭에서 카테고리를 먼저 만드세요.</p>';
-    const tree = `<div class="tree">${visibleRows().map(l => row(l, cats, namesByLayer)).join('')}</div>`;
+    const tree = `<div class="tree">${visibleRows().map(l => row(l, onSet, namesByLayer)).join('')}</div>`;
     if (!cats.length || !LMPanelPreview.isOn()) {
       el.innerHTML = `<div class="combo-bar">${bar}</div>${tree}`;
     } else {
@@ -164,15 +162,24 @@ LMUI.layers = (() => {
     return deep ? C().withDescendants(LMState.layers, base) : base;
   }
 
+  // 지금 고른 조합(배리에이션)에서만 켜거나 끈다. 넓은 항목(모든 조합 등)에서 켜진 레이어를 끄면
+  // 그 항목을 나머지 조합으로 쪼개 다른 조합에서는 그대로 켜져 있게 한다.
+  function setInCurrent(ids, on) {
+    const cats = LMState.docData.categories;
+    const v = C().previewVariation(C().fillCombo(LMState.combo, cats), cats);
+    if (!v) return false;
+    const combos = LMState.docData.combos;
+    LMState.docData.combos = on ? C().toggle(combos, v, ids, true) : C().removeFromVariation(combos, cats, v, ids);
+    return true;
+  }
+
+  function addToAll(ids) {
+    LMState.docData.combos = C().toggle(LMState.docData.combos, {}, ids, true);
+  }
+
   async function onCheckbox(cb, rowEl, e) {
-    if (cb.classList.contains('inherited')) {
-      LMState.combo = JSON.parse(cb.dataset.from);
-      return afterComboChange();
-    }
-    LMState.combo = C().cleanWhen(LMState.combo, LMState.docData.categories);
     const targets = checkboxTargets(Number(rowEl.dataset.layer), e.ctrlKey || e.metaKey);
-    const on = !cb.classList.contains('checked');
-    LMState.docData.combos = C().toggle(LMState.docData.combos, LMState.combo, targets, on);
+    if (!setInCurrent(targets, !cb.classList.contains('checked'))) return;
     // 저장이 끝난 뒤에 다시 그린다 (categories.js commit()과 같은 이유: 클릭 삼킴 방지).
     await LMApp.saveDocData();
     return afterComboChange();
@@ -200,6 +207,11 @@ LMUI.layers = (() => {
       await LMApp.saveDocData();
       return afterComboChange();
     }
+    if (btn.dataset.action === 'add-selected-all') {
+      addToAll(selectedExisting());
+      await LMApp.saveDocData();
+      return afterComboChange();
+    }
     if (btn.dataset.action === 'pv-redraw') return LMPanelPreview.request(true);
     if (btn.dataset.action === 'orphans-clean') {
       LMState.docData.combos = C().pruneOrphans(LMState.docData.combos, LMState.layers);
@@ -221,15 +233,8 @@ LMUI.layers = (() => {
       return LMApp.render();
     }
     const pick = e.target.closest('#tab-layers select[data-combo-cat]');
-    const made = e.target.closest('#tab-layers select.made-select');
     if (pick) {
-      const next = Object.assign({}, LMState.combo);
-      if (pick.value) next[pick.dataset.comboCat] = pick.value; else delete next[pick.dataset.comboCat];
-      LMState.combo = next;
-      return afterComboChange();
-    }
-    if (made && made.value) {
-      LMState.combo = JSON.parse(made.value);
+      LMState.combo = Object.assign({}, LMState.combo, { [pick.dataset.comboCat]: pick.value });
       return afterComboChange();
     }
   }
@@ -275,5 +280,5 @@ LMUI.layers = (() => {
     }, 150);
   });
 
-  return { render, afterComboChange, checkboxTargets };
+  return { render, afterComboChange, checkboxTargets, setInCurrent, addToAll };
 })();
