@@ -58,7 +58,6 @@ main.fill > .tab.active { flex: 1; min-height: 0; display: flex; flex-direction:
 .tree { flex: 1; min-height: 0; overflow: auto; }
 /* 패널 미리보기 분할 (independent preview spec §4.2). Chromium 63: conic-gradient·flex gap 없음 */
 .lm-split { flex: 1; min-height: 0; display: flex; }
-.lm-split.stack { flex-direction: column; }
 .pv-wrap { min-width: 0; min-height: 0; display: flex; }
 .pv-pane { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: #262626; border-radius: 3px; }
 .pv-head { display: flex; align-items: center; padding: 2px 4px; font-size: 11px; color: #bbb; }
@@ -73,7 +72,6 @@ main.fill > .tab.active { flex: 1; min-height: 0; display: flex; flex-direction:
 .pv-body .err { position: relative; margin: 0; padding: 8px; background: rgba(38, 38, 38, .85); }
 .pv-divider { flex: 0 0 4px; cursor: col-resize; background: #444; margin: 0 4px; }
 .pv-divider:hover { background: #4a90e2; }
-.lm-split.stack .pv-divider { cursor: row-resize; margin: 4px 0; }
 .lm-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 /* 내보내기 탭 */
 .preview { max-height: 180px; overflow: auto; background: #1f1f1f; border: 1px solid #444; padding: 4px; font-family: Consolas, monospace; font-size: 11px; white-space: pre; }

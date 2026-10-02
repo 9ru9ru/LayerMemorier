@@ -100,14 +100,19 @@ test('layer tab still renders the pane when localStorage throws', () => {
   assert.match(e.innerHTML, /lm-split"/);
 });
 
-test('a narrow layer tab stacks the pane above the list', () => {
+test('a narrow layer tab still puts the pane on the left (never stacked)', () => {
   const { ctx, el } = loadPanel();
   setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [], layers: [L(1, null)] });
   ctx.LMHost.call = async () => ({ path: 'C:/t/p.png', width: 1, height: 1, ms: 1 });
   ctx.LMPanelPreview.setOn(true);
-  const e = el(400, 700);
-  ctx.LMUI.layers.render(e);
-  assert.match(e.innerHTML, /lm-split stack/);
+  for (const w of [580, 400, 320]) {
+    const e = el(w, 900);
+    ctx.LMUI.layers.render(e);
+    assert.match(e.innerHTML, /class="lm-split"/, `${w}px: side by side`);
+    assert.doesNotMatch(e.innerHTML, /stack/, `${w}px: not stacked`);
+    const basis = Number(/flex:0 0 ([\d.]+)%/.exec(e.innerHTML)[1]);
+    assert.ok(basis > 0 && basis < 100, `${w}px: pane width ${basis}%`);
+  }
 });
 
 test('turning the panel preview on renders once, then serves the same combo from cache', async () => {

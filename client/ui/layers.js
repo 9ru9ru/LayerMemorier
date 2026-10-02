@@ -77,9 +77,9 @@ LMUI.layers = (() => {
       <span class="name">${esc(l.name)}</span>${list}</div>`;
   }
 
-  // 그림 쪽 최소 160px(쌓으면 120px), 목록 쪽 최소 320px(쌓으면 160px).
-  function splitRatio(ratio, stack, total) {
-    return LMCore.previewCache.clampSplit(ratio, total, stack ? 120 : 160, stack ? 160 : 320);
+  // 그림 쪽 최소 160px, 목록 쪽 최소 320px. 둘 다 못 지킬 만큼 좁으면 그림 최소를 지킨다.
+  function splitRatio(ratio, total) {
+    return LMCore.previewCache.clampSplit(ratio, total, 160, 320);
   }
 
   function render(el) {
@@ -104,10 +104,9 @@ LMUI.layers = (() => {
     if (!cats.length || !LMPanelPreview.isOn()) {
       el.innerHTML = `<div class="combo-bar">${bar}</div>${tree}`;
     } else {
-      // independent preview spec §4.2: 왼쪽 그림 | 경계 | 오른쪽 기존 내용. 좁으면 위아래로 쌓는다.
-      const stack = el.clientWidth < 600;
-      const r = splitRatio(LMPanelPreview.ratio(), stack, stack ? el.clientHeight : el.clientWidth);
-      el.innerHTML = `<div class="lm-split${stack ? ' stack' : ''}">` +
+      // independent preview spec §4.2: 패널 너비와 상관없이 왼쪽 그림 | 경계 | 오른쪽 기존 내용.
+      const r = splitRatio(LMPanelPreview.ratio(), el.clientWidth);
+      el.innerHTML = `<div class="lm-split">` +
         `<div class="pv-wrap" style="flex:0 0 ${(r * 100).toFixed(2)}%">${LMPanelPreview.paneHtml()}</div>` +
         `<div class="pv-divider" title="끌어서 크기 조절"></div>` +
         `<div class="lm-main"><div class="combo-bar">${bar}</div>${tree}</div></div>`;
@@ -252,13 +251,10 @@ LMUI.layers = (() => {
     e.preventDefault();
     const split = divider.parentElement;
     const wrap = split.querySelector('.pv-wrap');
-    const stack = split.classList.contains('stack');
     const box = split.getBoundingClientRect();
-    const total = stack ? box.height : box.width;
     let r = LMPanelPreview.ratio();
     const move = ev => {
-      const pos = stack ? ev.clientY - box.top : ev.clientX - box.left;
-      r = splitRatio(Math.min(0.999, Math.max(0.001, pos / total)), stack, total);
+      r = splitRatio(Math.min(0.999, Math.max(0.001, (ev.clientX - box.left) / box.width)), box.width);
       wrap.style.flex = `0 0 ${(r * 100).toFixed(2)}%`;
     };
     const up = () => {
@@ -270,7 +266,7 @@ LMUI.layers = (() => {
     document.addEventListener('mouseup', up);
   });
 
-  // 패널 크기가 바뀌면 나란히/쌓기를 다시 정한다.
+  // 패널 크기가 바뀌면 최소 크기 안으로 너비를 다시 맞춘다.
   let resizeTimer = null;
   window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);
