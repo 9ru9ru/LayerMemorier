@@ -34,7 +34,8 @@ LMUI.layers = (() => {
 
   function toggleBar() {
     const panel = `<label class="preview-toggle" title="레이어 탭 왼쪽에 지금 조합을 그립니다 (큰 문서는 한 번에 몇 초 걸릴 수 있음)"><input type="checkbox" class="panel-preview-switch" ${LMPanelPreview.isOn() ? 'checked' : ''}> 패널 미리보기</label>`;
-    return `<div class="row made">${panel}${LMPreview.toggleHtml()}</div>`;
+    const reset = `<button class="danger reset" data-action="combos-reset" ${LMState.docData.combos.length ? '' : 'disabled'} title="모든 조합의 레이어 켜짐·꺼짐 정보를 지웁니다 (카테고리·내보내기 설정은 그대로)">초기화</button>`;
+    return `<div class="row made">${panel}${LMPreview.toggleHtml()}${reset}</div>`;
   }
 
   // 조합 복사·붙여넣기: 한 조합에서 켜진 레이어를 다른 조합에 그대로 (붙여넣으면 대상이 똑같아진다).
@@ -178,6 +179,19 @@ LMUI.layers = (() => {
     return true;
   }
 
+  // 모든 조합의 레이어 켜짐·꺼짐 정보(combos)만 지운다. 카테고리·항상 뺄 조합·내보내기 설정은 그대로.
+  async function resetCombos() {
+    const combos = LMState.docData.combos;
+    if (!combos.length) return;
+    const checks = combos.reduce((n, c) => n + c.layers.length, 0);
+    if (!confirm(`모든 조합의 레이어 켜짐·꺼짐 정보를 지웁니다 (항목 ${combos.length}개, 체크 ${checks}개).\n` +
+      '카테고리와 내보내기 설정은 그대로입니다.\n되돌릴 수 없습니다 (PSD를 저장하기 전이면 저장하지 않고 다시 열어 되돌릴 수 있습니다). 계속할까요?')) return;
+    LMState.docData.combos = [];
+    await LMApp.saveDocData();
+    LMApp.status('레이어 켜짐·꺼짐 정보를 초기화했습니다. PSD를 저장해야 파일에 남습니다.');
+    return afterComboChange();
+  }
+
   function currentVariation() {
     const cats = LMState.docData.categories;
     return C().previewVariation(C().fillCombo(LMState.combo, cats), cats);
@@ -234,6 +248,7 @@ LMUI.layers = (() => {
     }
     const btn = e.target.closest('#tab-layers [data-action]');
     if (!btn) return;
+    if (btn.dataset.action === 'combos-reset') return resetCombos();
     if (btn.dataset.action === 'combo-copy') {
       if (!copyCombo()) return;
       LMApp.status(`조합 복사: ${LMState.comboClipboard.label} (레이어 ${LMState.comboClipboard.ids.length}개)`);
@@ -318,5 +333,5 @@ LMUI.layers = (() => {
     }, 150);
   });
 
-  return { render, afterComboChange, checkboxTargets, setInCurrent, copyCombo, pastePlan, pasteCombo };
+  return { render, afterComboChange, checkboxTargets, setInCurrent, copyCombo, pastePlan, pasteCombo, resetCombos };
 })();

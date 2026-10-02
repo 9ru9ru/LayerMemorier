@@ -405,3 +405,60 @@ test('the copied combo is dropped when another document is opened', async () => 
   assert.equal(ctx.LMState.comboClipboard, null);
   assert.equal(ctx.LMUI.layers.pasteCombo(), false);
 });
+
+// ---- 카테고리 탭: Tab으로 값 이름 → 파일명 글자 → 다음 줄 … ----
+
+test('category tab: only text fields are in the Tab order (×, ▲, ▼ are skipped)', () => {
+  const { ctx, el } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', ['a0', 'a1'])], combos: [], layers: [L(1, null)] });
+  const e = el(900);
+  ctx.LMUI.categories.render(e);
+  for (const action of ['value-delete', 'cat-up', 'cat-down', 'cat-delete']) {
+    const tags = e.innerHTML.match(new RegExp(`<button[^>]*data-action="${action}"[^>]*>`, 'g'));
+    assert.ok(tags && tags.every(t => /tabindex="-1"/.test(t)), action);
+  }
+  assert.doesNotMatch(e.innerHTML, /class="v-(name|label)"[^>]*tabindex/);
+});
+
+test('category tab: a field is found again after re-render by category, value and kind', () => {
+  const { ctx } = loadPanel();
+  assert.equal(ctx.LMUI.categories.fieldSelector('c_1', 'v_2', 'v-label'), '[data-category="c_1"] [data-value="v_2"] .v-label');
+  assert.equal(ctx.LMUI.categories.fieldSelector('c_1', null, 'c-name'), '[data-category="c_1"] .c-name');
+});
+
+// ---- 레이어 탭 초기화 (모든 조합의 켜짐·꺼짐 정보만) ----
+
+test('layer tab has a reset button, disabled when there is nothing to reset', () => {
+  const { ctx, el } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', ['a0'])], combos: [], layers: [L(1, null)] });
+  let e = el(900);
+  ctx.LMUI.layers.render(e);
+  assert.match(e.innerHTML, /<button[^>]*data-action="combos-reset"[^>]*disabled/);
+  ctx.LMState.docData.combos = [{ when: {}, layers: [1] }];
+  e = el(900);
+  ctx.LMUI.layers.render(e);
+  assert.doesNotMatch(e.innerHTML, /<button[^>]*data-action="combos-reset"[^>]*disabled/);
+});
+
+test('reset asks first; cancel keeps everything, confirm clears only the layer on/off data', async () => {
+  const { ctx } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', ['a0', 'a1'])], combos: [{ when: {}, layers: [1] }, { when: { A: 'a1' }, layers: [2] }], layers: [L(1, null), L(2, null)] });
+  ctx.LMState.docData.excluded = [{ A: 'a1' }];
+  const asked = [];
+  let saved = 0;
+  ctx.LMApp.saveDocData = async () => { saved++; };
+  ctx.LMHost.call = async () => ({ ok: true });
+  ctx.confirm = msg => { asked.push(msg); return false; };
+  await ctx.LMUI.layers.resetCombos();
+  assert.equal(ctx.LMState.docData.combos.length, 2, 'cancel keeps the combos');
+  assert.equal(saved, 0);
+  assert.match(asked[0], /레이어 켜짐·꺼짐/);
+  assert.match(asked[0], /되돌릴 수 없습니다/);
+
+  ctx.confirm = () => true;
+  await ctx.LMUI.layers.resetCombos();
+  assert.equal(ctx.LMState.docData.combos.length, 0);
+  assert.equal(saved, 1);
+  assert.equal(ctx.LMState.docData.categories.length, 1, 'categories stay');
+  assert.equal(ctx.LMState.docData.excluded.length, 1, 'export settings stay');
+});
