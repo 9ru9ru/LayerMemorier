@@ -145,6 +145,18 @@
     return compact(out);
   }
 
+  // 조합 붙여넣기: variation에서 켜지는 레이어를 정확히 ids로 맞춘다. 다른 배리에이션은 그대로.
+  function setVariationLayers(combos, categories, variation, ids) {
+    const want = new Set(ids);
+    const now = onLayerIds(combos, variation);
+    const nowSet = new Set(now);
+    const off = now.filter(id => !want.has(id));
+    const on = Array.from(want).filter(id => !nowSet.has(id));
+    let out = off.length ? removeFromVariation(combos, categories, variation, off) : combos;
+    if (on.length) out = toggle(out, variation, on, true);
+    return out;
+  }
+
   function removeLayers(combos, layerIds) {
     const drop = new Set(layerIds);
     return compact(combos.map(c => ({ when: c.when, layers: c.layers.filter(id => !drop.has(id)) })));
@@ -278,7 +290,7 @@
 
   return {
     matches, covers, sameWhen, onLayerIds, visibleLayerIds, withDescendants, unusedLayerIds, layerSignature, managedLayerIds, orphanLayerIds, pruneOrphans,
-    toggle, fillCombo, removeFromVariation, removeLayers, countWithLayers, removeFor, countFor, layerState,
+    toggle, fillCombo, removeFromVariation, setVariationLayers, removeLayers, countWithLayers, removeFor, countFor, layerState,
     isStale, cleanWhen, comboName, sortCombos, combosOfLayer, previewVariation, migrate,
   };
 });
