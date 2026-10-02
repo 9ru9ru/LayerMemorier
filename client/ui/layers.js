@@ -37,12 +37,17 @@ LMUI.layers = (() => {
     return `<div class="row made">${panel}${LMPreview.toggleHtml()}</div>`;
   }
 
-  function selectionBar() {
-    const ids = selectedExisting();
-    if (!ids.length) return '';
-    const m = C().countWithLayers(LMState.docData.combos, ids);
-    return `<div class="row selbar"><b>선택 ${ids.length}개</b><button data-action="add-selected-all">선택 레이어를 모든 조합에 넣기</button>` +
-      `<button data-action="remove-selected" ${m ? '' : 'disabled'}>선택 레이어를 모든 조합에서 빼기</button></div>`;
+  // 조합 복사·붙여넣기: 한 조합에서 켜진 레이어를 다른 조합에 그대로 (붙여넣으면 대상이 똑같아진다).
+  function clipboard() {
+    const clip = LMState.comboClipboard;
+    return clip && clip.docKey === LMState.docKey ? clip : null;
+  }
+
+  function clipBar() {
+    const clip = clipboard();
+    const info = clip ? `<span class="hint">복사한 조합: ${esc(clip.label)} · 레이어 ${clip.ids.length}개</span>` : '';
+    return `<div class="row clip"><button data-action="combo-copy" title="지금 조합에서 켜진 레이어를 기억합니다">조합 복사</button>` +
+      `<button data-action="combo-paste" ${clip ? '' : 'disabled'} title="복사한 조합과 똑같이 맞춥니다 (다른 조합은 그대로)">조합 붙여넣기</button>${info}</div>`;
   }
 
   function noticeBar() {
@@ -96,7 +101,7 @@ LMUI.layers = (() => {
     }
     const noValues = cats.length && !variation ? '<p class="hint">값이 없는 카테고리가 있어 조합을 고를 수 없습니다. 카테고리 탭에서 값을 추가하세요.</p>' : '';
     const bar = cats.length
-      ? pickerBar(cats) + noValues + toggleBar() + selectionBar() + noticeBar()
+      ? pickerBar(cats) + noValues + (variation ? clipBar() : '') + toggleBar() + noticeBar()
       : '<p class="hint">카테고리 탭에서 카테고리를 먼저 만드세요.</p>';
     const tree = `<div class="tree">${visibleRows().map(l => row(l, onSet, namesByLayer)).join('')}</div>`;
     if (!cats.length || !LMPanelPreview.isOn()) {
@@ -173,8 +178,38 @@ LMUI.layers = (() => {
     return true;
   }
 
-  function addToAll(ids) {
-    LMState.docData.combos = C().toggle(LMState.docData.combos, {}, ids, true);
+  function currentVariation() {
+    const cats = LMState.docData.categories;
+    return C().previewVariation(C().fillCombo(LMState.combo, cats), cats);
+  }
+
+  function copyCombo() {
+    const v = currentVariation();
+    if (!v) return false;
+    LMState.comboClipboard = {
+      docKey: LMState.docKey,
+      label: C().comboName(v, LMState.docData.categories),
+      ids: C().onLayerIds(LMState.docData.combos, v),
+    };
+    return true;
+  }
+
+  // 붙여넣으면 켜질 것·꺼질 것 (확인창용). 그 사이 지워진 레이어는 뺀다.
+  function pastePlan() {
+    const clip = clipboard();
+    const v = currentVariation();
+    if (!clip || !v) return null;
+    const existing = new Set(LMState.layers.map(l => l.id));
+    const want = clip.ids.filter(id => existing.has(id));
+    const now = C().onLayerIds(LMState.docData.combos, v);
+    return { on: want.filter(id => !now.includes(id)), off: now.filter(id => !want.includes(id)), want, v };
+  }
+
+  function pasteCombo() {
+    const plan = pastePlan();
+    if (!plan) return false;
+    LMState.docData.combos = C().setVariationLayers(LMState.docData.combos, LMState.docData.categories, plan.v, plan.want);
+    return true;
   }
 
   async function onCheckbox(cb, rowEl, e) {
@@ -199,17 +234,20 @@ LMUI.layers = (() => {
     }
     const btn = e.target.closest('#tab-layers [data-action]');
     if (!btn) return;
-    if (btn.dataset.action === 'remove-selected') {
-      const ids = selectedExisting();
-      const m = C().countWithLayers(LMState.docData.combos, ids);
-      if (!m || !confirm(`레이어 ${ids.length}개를 조합 ${m}개에서 뺍니다. 계속할까요?`)) return;
-      LMState.docData.combos = C().removeLayers(LMState.docData.combos, ids);
-      await LMApp.saveDocData();
-      return afterComboChange();
+    if (btn.dataset.action === 'combo-copy') {
+      if (!copyCombo()) return;
+      LMApp.status(`조합 복사: ${LMState.comboClipboard.label} (레이어 ${LMState.comboClipboard.ids.length}개)`);
+      return LMApp.render();
     }
-    if (btn.dataset.action === 'add-selected-all') {
-      addToAll(selectedExisting());
+    if (btn.dataset.action === 'combo-paste') {
+      const plan = pastePlan();
+      if (!plan) return;
+      const name = C().comboName(plan.v, LMState.docData.categories);
+      if (!plan.on.length && !plan.off.length) return LMApp.status(`${name}은(는) 이미 복사한 조합과 같습니다`);
+      if (!confirm(`"${clipboard().label}"을(를) "${name}"에 붙여넣습니다.\n켜질 레이어 ${plan.on.length}개, 꺼질 레이어 ${plan.off.length}개. 계속할까요?`)) return;
+      pasteCombo();
       await LMApp.saveDocData();
+      LMApp.status(`${name}에 붙여넣었습니다`);
       return afterComboChange();
     }
     if (btn.dataset.action === 'pv-redraw') return LMPanelPreview.request(true);
@@ -280,5 +318,5 @@ LMUI.layers = (() => {
     }, 150);
   });
 
-  return { render, afterComboChange, checkboxTargets, setInCurrent, addToAll };
+  return { render, afterComboChange, checkboxTargets, setInCurrent, copyCombo, pastePlan, pasteCombo };
 })();

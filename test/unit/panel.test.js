@@ -336,15 +336,13 @@ test('unchecking an "all combos" layer turns it off only in the current combo (a
   assert.equal(on({ A: 'a0', B: 'b1' }), true);
 });
 
-test('"선택 레이어를 모든 조합에 넣기" puts the selection into every combo', () => {
+test('selecting rows no longer shows bulk "all combos" buttons', () => {
   const { ctx, el } = loadPanel();
-  setupDoc(ctx, { categories: [cat('A', ['a0', 'a1'])], combos: [], layers: [L(1, null), L(2, null)] });
+  setupDoc(ctx, { categories: [cat('A', ['a0', 'a1'])], combos: [{ when: {}, layers: [1] }], layers: [L(1, null), L(2, null)] });
   ctx.LMState.selectedIds = [1, 2];
   const e = el(900);
   ctx.LMUI.layers.render(e);
-  assert.match(e.innerHTML, /data-action="add-selected-all"/);
-  ctx.LMUI.layers.addToAll([1, 2]);
-  for (const v of [{ A: 'a0' }, { A: 'a1' }]) assert.deepEqual(arr(ctx.LMCore.combos.onLayerIds(ctx.LMState.docData.combos, v)), [1, 2]);
+  assert.doesNotMatch(e.innerHTML, /add-selected-all|remove-selected|모든 조합에 넣기|모든 조합에서 빼기/);
 });
 
 test('a category without values: no checkboxes, a hint instead', () => {
@@ -354,4 +352,56 @@ test('a category without values: no checkboxes, a hint instead', () => {
   ctx.LMUI.layers.render(e);
   assert.doesNotMatch(e.innerHTML, /class="cb /);
   assert.match(e.innerHTML, /값이 없는 카테고리/);
+});
+
+// ---- 조합 복사 · 붙여넣기 ----
+
+function copyPasteDoc(ctx) {
+  setupDoc(ctx, {
+    categories: [cat('A', ['a0', 'a1']), cat('B', ['b0', 'b1'])],
+    combos: [{ when: {}, layers: [1] }, { when: { A: 'a0', B: 'b0' }, layers: [2] }, { when: { A: 'a1', B: 'b1' }, layers: [3] }],
+    layers: [L(1, null), L(2, null), L(3, null)],
+  });
+}
+const onIn = (ctx, v) => arr(ctx.LMCore.combos.onLayerIds(ctx.LMState.docData.combos, v));
+
+test('paste is disabled until a combo is copied', () => {
+  const { ctx, el } = loadPanel();
+  copyPasteDoc(ctx);
+  const e = el(900);
+  ctx.LMUI.layers.render(e);
+  assert.match(e.innerHTML, /data-action="combo-copy"/);
+  assert.match(e.innerHTML, /data-action="combo-paste" disabled/);
+  assert.equal(ctx.LMUI.layers.pasteCombo(), false);
+});
+
+test('copy a combo, switch, paste: the target combo becomes exactly the copied one, others untouched', () => {
+  const { ctx, el } = loadPanel();
+  copyPasteDoc(ctx);
+  ctx.LMState.combo = { A: 'a0', B: 'b0' };
+  assert.equal(ctx.LMUI.layers.copyCombo(), true);
+  ctx.LMState.combo = { A: 'a1', B: 'b1' };
+  const e = el(900);
+  ctx.LMUI.layers.render(e);
+  assert.match(e.innerHTML, /복사한 조합: Aa0_Bb0 · 레이어 2개/);
+  assert.doesNotMatch(e.innerHTML, /data-action="combo-paste" disabled/);
+  const plan = ctx.LMUI.layers.pastePlan();
+  assert.deepEqual([arr(plan.on), arr(plan.off)], [[2], [3]], 'turns on 2, turns off 3');
+  assert.equal(ctx.LMUI.layers.pasteCombo(), true);
+  assert.deepEqual(onIn(ctx, { A: 'a1', B: 'b1' }), [1, 2]);
+  assert.deepEqual(onIn(ctx, { A: 'a0', B: 'b0' }), [1, 2]);
+  assert.deepEqual(onIn(ctx, { A: 'a0', B: 'b1' }), [1]);
+  assert.deepEqual(onIn(ctx, { A: 'a1', B: 'b0' }), [1]);
+});
+
+test('the copied combo is dropped when another document is opened', async () => {
+  const { ctx } = loadPanel();
+  copyPasteDoc(ctx);
+  ctx.LMUI.layers.copyCombo();
+  ctx.LMHost.call = async fn => ({
+    getDocInfo: { name: 'b.psd', path: 'C:/b.psd' }, getOpenDocKeys: ['C:/b.psd'], getLayers: [L(1, null)], getSelectedLayerIds: [], readDocData: null,
+  }[fn]);
+  await ctx.LMApp.refresh();
+  assert.equal(ctx.LMState.comboClipboard, null);
+  assert.equal(ctx.LMUI.layers.pasteCombo(), false);
 });

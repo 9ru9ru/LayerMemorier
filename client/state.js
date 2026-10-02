@@ -8,6 +8,7 @@ const LMState = {
   collapsed: new Set(), // 접힌 그룹 id
   include: {},        // 이번만 내보낼 값 {categoryId: valueId[]} (세션)
   combo: {},          // 레이어 탭에서 고른 조합 {categoryId: valueId} (세션)
+  comboClipboard: null, // 조합 복사 {docKey, label, ids} (세션, 문서가 바뀌면 비움)
   anchorId: null,     // Shift 범위 선택의 시작 행 id
   previews: {},       // 포토샵 미리보기 {docKey: {snapshot: {layerId: visible}, touched: [layerId], combo: 반영한 조합}} (세션)
   exportOpen: {},     // 내보내기 탭 <details> 펼침 상태 {include, exclude, warnings} (세션)
@@ -98,6 +99,7 @@ const LMApp = {
         // 공유하는 다른 PSD에 같은 카테고리 id로 그대로 걸리지 않게 여기서 비운다.
         LMState.include = {};
         LMState.combo = {};
+        LMState.comboClipboard = null; // 레이어 id는 문서마다 겹친다
         LMState.anchorId = null;
         LMState.docKey = key;
         if (dropped) notice = `변환하면서 레이어 ${dropped}개의 마크를 버렸습니다 (없는 카테고리·값 참조)`;

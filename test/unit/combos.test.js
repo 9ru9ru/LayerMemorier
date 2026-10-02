@@ -320,3 +320,20 @@ test('removeFromVariation leaves combos alone when the layer is not on here', ()
   const combos = [{ when: { A: 'a1' }, layers: [10] }];
   assert.deepEqual(C.removeFromVariation(combos, cats, { A: 'a0', B: 'b0', N: 'n1' }, [10]), combos);
 });
+
+test('setVariationLayers makes one variation exactly the given set, every other variation unchanged', () => {
+  const v = { A: 'a1', B: 'b0', N: 'n2' };
+  const combos = deepFreeze([{ when: {}, layers: [30, 31] }, { when: { A: 'a1' }, layers: [10] }, { when: { B: 'b1' }, layers: [20] }]);
+  const out = C.setVariationLayers(combos, cats, v, [31, 20, 11]);
+  assert.deepEqual(C.onLayerIds(out, v), [11, 20, 31]);
+  for (const u of enumerate(cats)) {
+    if (sameV(u, v)) continue;
+    assert.deepEqual(C.onLayerIds(out, u), C.onLayerIds(combos, u), JSON.stringify(u));
+  }
+});
+
+test('setVariationLayers with the same set changes nothing', () => {
+  const v = { A: 'a0', B: 'b0', N: 'n1' };
+  const combos = [{ when: {}, layers: [30] }, { when: v, layers: [10] }];
+  assert.deepEqual(C.setVariationLayers(combos, cats, v, [10, 30]), combos);
+});
