@@ -405,3 +405,23 @@ test('the copied combo is dropped when another document is opened', async () => 
   assert.equal(ctx.LMState.comboClipboard, null);
   assert.equal(ctx.LMUI.layers.pasteCombo(), false);
 });
+
+// ---- 카테고리 탭: Tab으로 값 이름 → 파일명 글자 → 다음 줄 … ----
+
+test('category tab: only text fields are in the Tab order (×, ▲, ▼ are skipped)', () => {
+  const { ctx, el } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', ['a0', 'a1'])], combos: [], layers: [L(1, null)] });
+  const e = el(900);
+  ctx.LMUI.categories.render(e);
+  for (const action of ['value-delete', 'cat-up', 'cat-down', 'cat-delete']) {
+    const tags = e.innerHTML.match(new RegExp(`<button[^>]*data-action="${action}"[^>]*>`, 'g'));
+    assert.ok(tags && tags.every(t => /tabindex="-1"/.test(t)), action);
+  }
+  assert.doesNotMatch(e.innerHTML, /class="v-(name|label)"[^>]*tabindex/);
+});
+
+test('category tab: a field is found again after re-render by category, value and kind', () => {
+  const { ctx } = loadPanel();
+  assert.equal(ctx.LMUI.categories.fieldSelector('c_1', 'v_2', 'v-label'), '[data-category="c_1"] [data-value="v_2"] .v-label');
+  assert.equal(ctx.LMUI.categories.fieldSelector('c_1', null, 'c-name'), '[data-category="c_1"] .c-name');
+});

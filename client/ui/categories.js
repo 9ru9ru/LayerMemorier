@@ -8,6 +8,10 @@ LMUI.categories = (() => {
   ];
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   let presets = null;
+  // 다음 render 뒤에 커서를 둘 칸 (값 추가·카테고리 추가 직후 새 칸).
+  let pendingFocus = null;
+  // 다시 그린 뒤 같은 칸을 찾을 때 쓰는 칸 종류.
+  const FIELD_CLASSES = ['v-name', 'v-label', 'c-name', 'c-format', 'range-from', 'range-to'];
 
   function presetBar() {
     presets = presets || LMPresets.load();
@@ -34,7 +38,7 @@ LMUI.categories = (() => {
       <div class="row value-row" data-value="${esc(v.id)}">
         <input class="v-name" data-field="name" value="${esc(v.name)}" placeholder="값 이름">
         <input class="v-label" data-field="label" value="${esc(v.label)}" placeholder="비우면 파일명에서 빠짐">
-        <button data-action="value-delete" title="값 삭제">×</button>
+        <button data-action="value-delete" title="값 삭제" tabindex="-1">×</button>
       </div>`).join('');
   }
 
@@ -53,10 +57,10 @@ LMUI.categories = (() => {
         <div class="row cat-head">
           <span class="dot" style="background:${LMColors.hex(c.color)}"></span>
           <input class="c-name" data-field="name" value="${esc(c.name)}" placeholder="카테고리 이름">
-          <select data-field="labelFormat" title="값이 파일명에 어떤 모양으로 들어갈지">${formats}</select>
-          <button data-action="cat-up" ${i === 0 ? 'disabled' : ''}>▲</button>
-          <button data-action="cat-down" ${i === n - 1 ? 'disabled' : ''}>▼</button>
-          <button data-action="cat-delete" title="카테고리 삭제">×</button>
+          <select class="c-format" data-field="labelFormat" title="값이 파일명에 어떤 모양으로 들어갈지">${formats}</select>
+          <button data-action="cat-up" tabindex="-1" ${i === 0 ? 'disabled' : ''}>▲</button>
+          <button data-action="cat-down" tabindex="-1" ${i === n - 1 ? 'disabled' : ''}>▼</button>
+          <button data-action="cat-delete" title="카테고리 삭제" tabindex="-1">×</button>
         </div>
         <div class="values">
           ${valueRows(c)}
@@ -70,10 +74,46 @@ LMUI.categories = (() => {
       </div>`;
   }
 
+  function fieldSelector(categoryId, valueId, cls) {
+    return `[data-category="${categoryId}"]` + (valueId ? ` [data-value="${valueId}"]` : '') + ` .${cls}`;
+  }
+
+  // 입력칸에서 Tab을 누르면 change → 저장 → 다시 그리기가 일어나 옮겨 간 칸이 새로 만들어진다.
+  // 그 칸(과 아직 저장 안 된 글자·커서 위치)을 기억했다가 다시 그린 뒤 되돌린다.
+  function focusedField(el) {
+    const a = document.activeElement;
+    if (!a || !el.contains(a)) return null;
+    const cls = FIELD_CLASSES.find(k => a.classList.contains(k));
+    const block = a.closest('[data-category]');
+    if (!cls || !block) return null;
+    const row = a.closest('[data-value]');
+    const text = a.tagName === 'INPUT' && a.type !== 'number';
+    return {
+      selector: fieldSelector(block.dataset.category, row && row.dataset.value, cls),
+      value: a.value,
+      text,
+      start: text ? a.selectionStart : null,
+      end: text ? a.selectionEnd : null,
+    };
+  }
+
+  function restoreField(el, f) {
+    const t = el.querySelector(f.selector);
+    if (!t) return;
+    if (f.value != null && t.tagName === 'INPUT') t.value = f.value;
+    t.focus();
+    if (f.text) {
+      try { t.setSelectionRange(f.start == null ? t.value.length : f.start, f.end == null ? t.value.length : f.end); } catch (e) { /* 일부 입력칸은 선택 범위가 없다 */ }
+    }
+  }
+
   function render(el) {
     const cats = LMState.docData.categories;
+    const keep = pendingFocus || focusedField(el);
+    pendingFocus = null;
     el.innerHTML = presetBar() + cats.map((c, i) => categoryBlock(c, i, cats.length)).join('') +
       `<div class="row"><button data-action="cat-add">카테고리 추가</button></div>`;
+    if (keep) restoreField(el, keep);
   }
 
   // 저장이 끝난 뒤에 다시 그린다. 저장을 기다리지 않고 그리면 blur→change 로
@@ -102,7 +142,12 @@ LMUI.categories = (() => {
     const c = findCategory(btn);
     const idx = c ? cats.indexOf(c) : -1;
     switch (btn.dataset.action) {
-      case 'cat-add': cats.push(LMApp.newCategory()); return commit();
+      case 'cat-add': {
+        const nc = LMApp.newCategory();
+        cats.push(nc);
+        pendingFocus = { selector: fieldSelector(nc.id, null, 'c-name'), value: null, text: true, start: null, end: null };
+        return commit();
+      }
       case 'cat-delete': {
         const n = LMCore.combos.countFor(LMState.docData.combos, c.id, null);
         if (!confirm(`카테고리 "${c.name}"를 지웁니다.` + (n ? ` 이 카테고리를 쓰는 조합 ${n}개도 지워집니다.` : ''))) return;
@@ -114,7 +159,13 @@ LMUI.categories = (() => {
       }
       case 'cat-up': if (idx > 0) { cats.splice(idx - 1, 0, cats.splice(idx, 1)[0]); return commit(); } return;
       case 'cat-down': if (idx < cats.length - 1) { cats.splice(idx + 1, 0, cats.splice(idx, 1)[0]); return commit(); } return;
-      case 'value-add': c.values.push(LMApp.newValue(String(c.values.length))); return commit();
+      case 'value-add': {
+        const nv = LMApp.newValue(String(c.values.length));
+        c.values.push(nv);
+        // 새 줄의 값 이름 칸, 글자 전체 선택 (바로 덮어 쓰기).
+        pendingFocus = { selector: fieldSelector(c.id, nv.id, 'v-name'), value: null, text: true, start: 0, end: null };
+        return commit();
+      }
       case 'value-range': {
         const block = btn.closest('[data-category]');
         const from = parseInt(block.querySelector('.range-from').value, 10);
@@ -192,5 +243,5 @@ LMUI.categories = (() => {
     return commit();
   }
 
-  return { render, reloadPresets: () => { presets = null; } };
+  return { render, fieldSelector, reloadPresets: () => { presets = null; } };
 })();
