@@ -39,6 +39,41 @@
     return Array.from(set).sort(asc);
   }
 
+  // independent preview spec §3.1. 체크한 레이어(문서에 있는 것) + 그 조상 그룹. PSD 눈 상태와 무관하다.
+  function visibleLayerIds(combos, layers, variation) {
+    const byId = new Map(layers.map(l => [l.id, l]));
+    const set = new Set();
+    for (const id of onLayerIds(combos, variation)) {
+      // 이미 넣은 레이어를 만나면 그 위 조상도 이미 들어 있다.
+      for (let l = byId.get(id); l && !set.has(l.id); l = l.parentId != null ? byId.get(l.parentId) : null) set.add(l.id);
+    }
+    return Array.from(set).sort(asc);
+  }
+
+  // independent preview spec §3.3. ids와 그중 그룹의 모든 하위 레이어.
+  function withDescendants(layers, ids) {
+    const out = new Set(ids);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const l of layers) {
+        if (l.parentId != null && out.has(l.parentId) && !out.has(l.id)) { out.add(l.id); grew = true; }
+      }
+    }
+    return Array.from(out);
+  }
+
+  // independent preview spec §3.2. 어느 조합에도 없고, 어느 조합 레이어의 조상도 아닌 레이어.
+  function unusedLayerIds(combos, layers) {
+    const used = new Set(visibleLayerIds([{ when: {}, layers: Array.from(allLayerIds(combos)) }], layers, {}));
+    return layers.filter(l => !used.has(l.id)).map(l => l.id).sort(asc);
+  }
+
+  // independent preview spec §4.4. 레이어 id·부모·순서가 같으면 같은 문자열 (눈·이름은 무시).
+  function layerSignature(layers) {
+    return layers.map(l => l.id + ':' + (l.parentId == null ? '' : l.parentId)).join(',');
+  }
+
   function managedLayerIds(combos, layers) {
     const existing = existingIds(layers);
     return Array.from(allLayerIds(combos)).filter(id => existing.has(id)).sort(asc);
@@ -204,7 +239,7 @@
   }
 
   return {
-    matches, covers, sameWhen, onLayerIds, managedLayerIds, orphanLayerIds, pruneOrphans,
+    matches, covers, sameWhen, onLayerIds, visibleLayerIds, withDescendants, unusedLayerIds, layerSignature, managedLayerIds, orphanLayerIds, pruneOrphans,
     toggle, removeLayers, countWithLayers, removeFor, countFor, layerState,
     isStale, cleanWhen, comboName, sortCombos, combosOfLayer, previewVariation, migrate,
   };

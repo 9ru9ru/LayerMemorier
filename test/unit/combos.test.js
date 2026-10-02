@@ -227,3 +227,44 @@ test('cleanWhen drops keys whose category or value no longer exists', () => {
   assert.deepEqual(C.cleanWhen(when, cats), { A: 'a1', N: 'n2' });
   assert.deepEqual(C.cleanWhen({}, cats), {});
 });
+
+// ---- independent preview spec §3 ----
+const tree = [
+  { id: 1, kind: 'group', parentId: null, visible: false },
+  { id: 2, kind: 'group', parentId: 1, visible: false },
+  { id: 3, kind: 'layer', parentId: 2, visible: false },
+  { id: 4, kind: 'layer', parentId: 2, visible: true },
+  { id: 5, kind: 'layer', parentId: null, visible: true },
+];
+
+test('visibleLayerIds: checked layer plus every ancestor, regardless of PSD visibility', () => {
+  assert.deepEqual(C.visibleLayerIds([{ when: {}, layers: [3] }], tree, {}), [1, 2, 3]);
+});
+
+test('visibleLayerIds: a checked group does not turn its children on', () => {
+  assert.deepEqual(C.visibleLayerIds([{ when: {}, layers: [2] }], tree, {}), [1, 2]);
+});
+
+test('visibleLayerIds: unions matching combos, skips non-matching and missing layers', () => {
+  const c = [{ when: { A: 'a0' }, layers: [3, 999] }, { when: { A: 'a1' }, layers: [5] }, { when: {}, layers: [4] }];
+  assert.deepEqual(C.visibleLayerIds(c, tree, { A: 'a0' }), [1, 2, 3, 4]);
+  assert.deepEqual(C.visibleLayerIds(c, tree, { A: 'a1' }), [1, 2, 4, 5]);
+});
+
+test('withDescendants: nested groups expand fully, plain layers stay, no duplicates', () => {
+  assert.deepEqual(C.withDescendants(tree, [1]), [1, 2, 3, 4]);
+  assert.deepEqual(C.withDescendants(tree, [5]), [5]);
+  assert.deepEqual(C.withDescendants(tree, [2, 3]), [2, 3, 4]);
+});
+
+test('unusedLayerIds: layers neither checked anywhere nor ancestors of checked ones', () => {
+  assert.deepEqual(C.unusedLayerIds([{ when: { A: 'a0' }, layers: [3] }], tree), [4, 5]);
+  assert.deepEqual(C.unusedLayerIds([], tree), [1, 2, 3, 4, 5]);
+});
+
+test('layerSignature changes with structure, not with visibility or names', () => {
+  const a = C.layerSignature(tree);
+  assert.equal(C.layerSignature(tree.map(l => Object.assign({}, l, { visible: !l.visible, name: 'x' }))), a);
+  assert.notEqual(C.layerSignature(tree.slice(1)), a);
+  assert.notEqual(C.layerSignature(tree.map(l => l.id === 4 ? Object.assign({}, l, { parentId: 1 }) : l)), a);
+});
