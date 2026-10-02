@@ -58,7 +58,11 @@ function loadPanel(opts = {}) {
     vm.runInContext(fs.readFileSync(file, 'utf8'), ctx, { filename: file });
   }
   // const 로 선언된 전역(LMState, LMUI …)은 전역 객체의 속성이 아니므로 이름으로 꺼낸다.
-  const api = new Proxy({}, { get: (_, name) => vm.runInContext(String(name), ctx) });
+  // 쓰기는 전역 객체에 (예: ctx.confirm = () => false 로 확인창 스텁).
+  const api = new Proxy({}, {
+    get: (_, name) => vm.runInContext(String(name), ctx),
+    set: (_, name, value) => { ctx[name] = value; return true; },
+  });
   return { ctx: api, el: (w, h) => fakeEl(w, h) };
 }
 
