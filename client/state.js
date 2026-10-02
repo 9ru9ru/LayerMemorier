@@ -15,6 +15,8 @@ const LMState = {
   renderedTab: null,  // 직전에 그린 탭 (스크롤 복원 판단용)
   tab: 'categories',
   exporting: false,
+  previewing: false,  // 패널 미리보기가 호스트에서 그리는 중 (panel-preview.js)
+  previewQuietUntil: 0, // 이 시각(ms) 전까지는 미리보기가 일으킨 문서 이벤트로 보고 무시
   abort: false,
   progress: null,     // {done, total, current}
   summary: null,      // {done, failures:[{path,error}]}
@@ -39,6 +41,11 @@ const LMApp = {
   // 레이어 목록을 통째로 다시 읽으면 클릭한 자리에서 스크롤이 튄다.
   // 300ms 동안은 main.js의 디바운스가 새로고침을 건너뛴다.
   muteEcho() { LMState.echoUntil = Date.now() + 300; },
+
+  // 패널이 일으킨 문서 전환·닫기(내보내기·패널 미리보기의 복제본)는 메아리 필터를 건너뛰는 이벤트라 따로 막는다.
+  ignoreHostEvents() {
+    return LMState.exporting || LMState.previewing || Date.now() < LMState.previewQuietUntil;
+  },
 
   // 패널이 알고 있는 문서를 같이 보낸다. 호스트가 활성 문서와 다르면 거부하므로
   // docInfo가 낡았을 때 다른 문서의 XMP를 덮어쓰는 일이 없다.

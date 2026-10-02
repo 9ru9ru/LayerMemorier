@@ -193,3 +193,46 @@ test('the toggle and split ratio are remembered in localStorage', () => {
   assert.equal(first.ctx.localStorage.getItem('lm.previewSplit'), '0.55');
   assert.equal(first.ctx.LMPanelPreview.ratio(), 0.55);
 });
+
+test('a queued render for a combo the user already left is skipped (only the shown one renders)', async () => {
+  const { ctx } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', ['a', 'b', 'c'])], combos: [{ when: { A: 'b' }, layers: [2] }, { when: { A: 'c' }, layers: [3] }], layers: [L(1, null), L(2, null), L(3, null)] });
+  ctx.LMPanelPreview.setOn(true);
+  // c 를 먼저 그려 캐시에 넣는다.
+  ctx.LMHost.call = async () => ({ path: 'C:/t/c.png', width: 1, height: 1, ms: 1 });
+  ctx.LMState.combo = { A: 'c' };
+  await ctx.LMPanelPreview.request(false);
+
+  const rendered = [];
+  let release;
+  ctx.LMHost.call = async (fn, arg) => {
+    rendered.push(arr(arg.on).join(','));
+    if (rendered.length === 1) await new Promise(r => { release = r; });
+    return { path: 'C:/t/p' + rendered.length + '.png', width: 1, height: 1, ms: 1 };
+  };
+  ctx.LMState.combo = { A: 'a' };
+  const done = ctx.LMPanelPreview.request(false); // a: 그리는 중
+  ctx.LMState.combo = { A: 'b' };
+  ctx.LMPanelPreview.request(false);              // b: 대기
+  ctx.LMState.combo = { A: 'c' };
+  ctx.LMPanelPreview.request(false);              // c: 캐시 → 바로 표시, b는 더 볼 일 없음
+  release();
+  await done;
+  assert.deepEqual(rendered, ['']);
+  assert.match(ctx.LMPanelPreview.paneHtml(), /C:\/t\/c\.png/);
+  assert.doesNotMatch(ctx.LMPanelPreview.paneHtml(), /그리는 중/);
+});
+
+test('while a render runs, host document events are ignored (and for a short while after)', async () => {
+  const { ctx } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [], layers: [L(1, null)] });
+  let during = null;
+  ctx.LMHost.call = async () => { during = ctx.LMApp.ignoreHostEvents(); return { path: 'C:/t/p.png', width: 1, height: 1, ms: 1 }; };
+  ctx.LMPanelPreview.setOn(true);
+  assert.equal(ctx.LMApp.ignoreHostEvents(), false);
+  await ctx.LMPanelPreview.request(false);
+  assert.equal(during, true);
+  assert.equal(ctx.LMApp.ignoreHostEvents(), true, 'events from closing the duplicate arrive after the call returns');
+  ctx.LMState.previewQuietUntil = Date.now() - 1;
+  assert.equal(ctx.LMApp.ignoreHostEvents(), false);
+});

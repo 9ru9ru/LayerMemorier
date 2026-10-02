@@ -82,11 +82,15 @@ const LMPanelPreview = (() => {
     if (LMState.exporting || !isOn() || !LMState.docInfo) return;
     const hit = cache.get(t.key);
     if (hit) { if (t.key === wanted) show(hit, t.label); return; }
+    // 기다리는 사이 다른 조합으로 넘어갔으면 아무도 안 볼 그림이다. 큰 문서에서 몇 초씩 포토샵을 막지 않는다.
+    if (t.key !== wanted) return;
     state.busy = true;
     paint();
     const doc = { name: LMState.docInfo.name, path: LMState.docInfo.path || null };
-    // 가시성 적용·히스토리 되돌림이 일으키는 이벤트는 패널 자신의 메아리다.
+    // 가시성 적용·복제본 만들고 닫기·히스토리 정리가 일으키는 이벤트는 패널 자신의 메아리다.
+    // 문서 전환·닫기 이벤트는 muteEcho로 걸러지지 않으므로 그리는 동안과 직후 잠깐은 무시한다 (main.js).
     LMApp.muteEcho();
+    LMState.previewing = true;
     try {
       const r = await LMHost.call('renderPreview', { doc, on: t.on, off: t.off, maxSize: MAX_SIZE });
       cache.set(t.key, r.path);
@@ -94,6 +98,8 @@ const LMPanelPreview = (() => {
     } catch (e) {
       if (t.key === wanted) state.error = message(e);
     } finally {
+      LMState.previewing = false;
+      LMState.previewQuietUntil = Date.now() + 500;
       LMApp.muteEcho();
       state.busy = false;
       paint();
