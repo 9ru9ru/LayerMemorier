@@ -257,9 +257,16 @@ test('withDescendants: nested groups expand fully, plain layers stay, no duplica
   assert.deepEqual(C.withDescendants(tree, [2, 3]), [2, 3, 4]);
 });
 
+const treeCats = [{ id: 'A', values: [{ id: 'a0' }] }];
+
 test('unusedLayerIds: layers neither checked anywhere nor ancestors of checked ones', () => {
-  assert.deepEqual(C.unusedLayerIds([{ when: { A: 'a0' }, layers: [3] }], tree), [4, 5]);
-  assert.deepEqual(C.unusedLayerIds([], tree), [1, 2, 3, 4, 5]);
+  assert.deepEqual(C.unusedLayerIds([{ when: { A: 'a0' }, layers: [3] }], tree, treeCats), [4, 5]);
+  assert.deepEqual(C.unusedLayerIds([], tree, treeCats), [1, 2, 3, 4, 5]);
+});
+
+test('#5 unusedLayerIds: a layer only in stale combos still counts as unused', () => {
+  const c = [{ when: { A: 'gone' }, layers: [5] }, { when: { Z: 'z0' }, layers: [4] }, { when: { A: 'a0' }, layers: [3] }];
+  assert.deepEqual(C.unusedLayerIds(c, tree, treeCats), [4, 5]);
 });
 
 test('layerSignature changes with structure, not with visibility or names', () => {

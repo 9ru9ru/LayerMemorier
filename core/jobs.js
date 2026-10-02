@@ -18,7 +18,7 @@
     for (const c of combos) {
       if (combosLib.isStale(c.when, docData.categories)) warnings.push({ type: 'stale', detail: { when: c.when } });
     }
-    const unused = combosLib.unusedLayerIds(combos, layers).length;
+    const unused = combosLib.unusedLayerIds(combos, layers, docData.categories).length;
     if (unused) warnings.push({ type: 'unused', detail: { count: unused } });
 
     const seen = new Map();

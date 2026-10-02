@@ -64,8 +64,10 @@
   }
 
   // independent preview spec §3.2. 어느 조합에도 없고, 어느 조합 레이어의 조상도 아닌 레이어.
-  function unusedLayerIds(combos, layers) {
-    const used = new Set(visibleLayerIds([{ when: {}, layers: Array.from(allLayerIds(combos)) }], layers, {}));
+  // 낡은 조합(없는 카테고리·값)은 어떤 배리에이션과도 맞지 않으므로 체크로 치지 않는다 (#5).
+  function unusedLayerIds(combos, layers, categories) {
+    const live = combos.filter(c => !isStale(c.when, categories));
+    const used = new Set(visibleLayerIds([{ when: {}, layers: Array.from(allLayerIds(live)) }], layers, {}));
     return layers.filter(l => !used.has(l.id)).map(l => l.id).sort(asc);
   }
 

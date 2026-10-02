@@ -87,3 +87,9 @@ test('layers never checked anywhere produce one unused warning with the count', 
   const { warnings } = buildJobs(d, layers, enumerate(categories));
   assert.deepEqual(warnings, [{ type: 'unused', detail: { count: 4 } }]);
 });
+
+test('#5 a layer only in a stale combo is counted in the unused warning', () => {
+  const d = doc([{ when: { A: 'gone' }, layers: [30] }, { when: {}, layers: [11, 20, 21] }]);
+  const { warnings } = buildJobs(d, layers, enumerate(categories));
+  assert.deepEqual(warnings.filter(w => w.type === 'unused'), [{ type: 'unused', detail: { count: 1 } }]);
+});
