@@ -15,7 +15,7 @@
     let docChanged = false;
     let ids = {};
     ids = await LMHost.onEvents(ev => {
-      if (LMState.exporting) return;
+      if (LMApp.ignoreHostEvents()) return;
       // 문서 전환·닫기·새 문서는 패널이 일으킬 수 없으므로 메아리로 보고 건너뛰지 않는다.
       // 스크립트로 새 문서를 만들면 documentAfterActivate 없이 make(new: document)만 온다.
       const { id, data } = LMHost.eventInfo(ev);

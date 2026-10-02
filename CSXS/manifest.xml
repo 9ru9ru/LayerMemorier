@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<ExtensionManifest Version="9.0" ExtensionBundleId="local.layermemorier" ExtensionBundleVersion="0.3.0" ExtensionBundleName="LayerMemorier" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+<ExtensionManifest Version="9.0" ExtensionBundleId="local.layermemorier" ExtensionBundleVersion="0.4.1" ExtensionBundleName="LayerMemorier" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <ExtensionList>
-    <Extension Id="local.layermemorier.panel" Version="0.3.0"/>
+    <Extension Id="local.layermemorier.panel" Version="0.4.1"/>
   </ExtensionList>
   <ExecutionEnvironment>
     <HostList>
@@ -28,7 +28,7 @@
           <Type>Panel</Type>
           <Menu>LayerMemorier</Menu>
           <Geometry>
-            <Size><Height>760</Height><Width>520</Width></Size>
+            <Size><Height>760</Height><Width>900</Width></Size>
             <MinSize><Height>300</Height><Width>320</Width></MinSize>
             <MaxSize><Height>3000</Height><Width>2000</Width></MaxSize>
           </Geometry>

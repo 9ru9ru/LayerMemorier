@@ -670,6 +670,98 @@ var LM = LM || {};
     return { ok: true };
   });
 
+  // ---- panel preview (independent preview spec 5.2) ----
+
+  var previewCleaned = false;
+
+  function previewFolder() {
+    var f = new Folder(Folder.temp.fsName + '/LayerMemorier');
+    if (!f.exists) f.create();
+    return f;
+  }
+
+  var PREVIEW_STEP = 'LayerMemorier preview';
+
+  function currentHistoryRef() {
+    var r = new ActionReference();
+    r.putProperty(cid('HstS'), cid('CrnH'));
+    return r;
+  }
+
+  // Redo steps the artist could still use: history states after the current one,
+  // except a greyed step this preview left behind (fallback in dropPreviewStep).
+  // Rendering would throw them away, so refuse instead.
+  function hasRedo() {
+    var d = executeActionGet(currentHistoryRef());
+    var index = d.getInteger(cid('ItmI'));
+    var count = d.getInteger(cid('Cnt '));
+    for (var i = index + 1; i <= count; i++) {
+      var r = new ActionReference();
+      r.putIndex(cid('HstS'), i);
+      if (executeActionGet(r).getString(cid('Nm  ')) !== PREVIEW_STEP) return true;
+    }
+    return false;
+  }
+
+  // Remove the preview's own history step. Deleting it (when it is the current state)
+  // leaves no greyed redo step behind; stepping back to `saved` would leave one.
+  // When the preview made no step (nothing to change), the current state is the
+  // artist's and must not be deleted.
+  function dropPreviewStep(doc, saved) {
+    try {
+      if (executeActionGet(currentHistoryRef()).getString(cid('Nm  ')) === PREVIEW_STEP) {
+        var desc = new ActionDescriptor();
+        desc.putReference(cid('null'), currentHistoryRef());
+        executeAction(cid('Dlt '), desc, DialogModes.NO);
+        return;
+      }
+    } catch (e) {
+      // fall back below
+    }
+    doc.activeHistoryState = saved;
+  }
+
+  // Merged picture of one variation, at most maxSize px on the long side, as a temp PNG.
+  // The visibility change is one history step that is deleted afterwards, so the
+  // document and its history look untouched.
+  LM.renderPreview = wrap(function (a) {
+    if (!hasDoc()) throw new Error('no document');
+    activateExpected(a.doc);
+    var doc = app.activeDocument;
+    var started = new Date().getTime();
+    var folder = previewFolder();
+    if (!previewCleaned) {
+      var old = folder.getFiles('preview_*.png');
+      for (var i = 0; i < old.length; i++) {
+        try { old[i].remove(); } catch (e) {}
+      }
+      previewCleaned = true;
+    }
+    if (hasRedo()) throw new Error('LM_REDO_PENDING');
+    var file = new File(folder.fsName + '/preview_' + started + '.png');
+    var size = null;
+    var saved = doc.activeHistoryState;
+    withoutDialogs(function () {
+      try {
+        applyVisibilityAs(PREVIEW_STEP, a.on, a.off);
+        withMergedDuplicate(doc, 'lm_preview_tmp', function (dup) {
+          var w = dup.width.as('px');
+          var h = dup.height.as('px');
+          var k = Math.min(1, a.maxSize / Math.max(w, h));
+          if (k < 1) {
+            dup.resizeImage(px(Math.max(1, Math.round(w * k))), px(Math.max(1, Math.round(h * k))), undefined, ResampleMethod.BICUBICSHARPER);
+          }
+          sfwPng24(file, { interlaced: false, transparency: true, matte: 'none' });
+          size = { width: dup.width.as('px'), height: dup.height.as('px') };
+        });
+      } finally {
+        dropPreviewStep(doc, saved);
+      }
+    });
+    if (!file.exists) throw new Error('preview save failed, file not found: ' + file.fsName);
+    return { path: String(file.fsName).replace(/\\/g, '/'), width: size.width, height: size.height, ms: new Date().getTime() - started };
+  });
+
   // Keys match the panel's docKey: full path when saved, otherwise the name.
   LM.getOpenDocKeys = wrap(function () {
     var keys = [];

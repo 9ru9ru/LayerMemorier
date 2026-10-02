@@ -9,7 +9,6 @@ const { buildFixture, docDataFor } = require('../helpers/fixture');
 const { visibleBounds, pixel } = require('../helpers/cells');
 const { enumerate } = require('../../core/variation');
 const { buildJobs } = require('../../core/jobs');
-const { managedLayerIds } = require('../../core/combos');
 const { normalize, isFastPath, unionBounds } = require('../../core/output');
 
 const DEST = path.join(ROOT, 'test', 'out', 'formats').replace(/\\/g, '/');
@@ -17,7 +16,7 @@ const out = name => path.join(DEST, name);
 const head = (name, n) => fs.readFileSync(out(name)).subarray(0, n);
 const png = name => PNG.sync.read(fs.readFileSync(out(name)));
 
-// fixture 를 새로 만든다. hideBg 면 늘 보이는 배경 칸(BG, 조합 밖 레이어)을 꺼서 잘라내기 영역이 조합마다 달라지게 한다.
+// fixture 를 새로 만든다. 0.4.0부터 BG(조합 밖 레이어)는 출력에서 늘 꺼지므로 hideBg 는 PSD 눈만 끈다 (결과는 같아야 한다).
 function setup({ hideBg = false } = {}) {
   const { byName } = buildFixture();
   if (hideBg) psCall('applyVisibility', { on: [], off: [byName.BG] });
@@ -36,7 +35,7 @@ function jobFor(ctx, v, output, file, crop = null) {
 
 // exportBegin → exportOne… → exportEnd 를 COM 호출 한 번으로. 각 결과(파싱된 객체)를 돌려준다.
 function run(ctx, jobs) {
-  const ids = managedLayerIds(ctx.docData.combos, ctx.layers);
+  const ids = ctx.layers.map(l => l.id);
   const lines = [`LM.exportBegin(${JSON.stringify(JSON.stringify({ layerIds: ids }))});`, 'var results = [];'];
   for (const j of jobs) lines.push(`results.push(LM.exportOne(${JSON.stringify(JSON.stringify(j))}));`);
   lines.push('LM.exportEnd();', 'JSON.stringify(results)');
@@ -339,7 +338,7 @@ test('export calls switch back to the expected document when another one became 
   const doc = { name: info.name, path: info.path };
   const v = V(ctx, 'a0', 'b0', 'n1');
   const j = Object.assign(jobFor(ctx, v, {}, 'switched.png'), { doc });
-  psCall('exportBegin', { layerIds: managedLayerIds(ctx.docData.combos, ctx.layers), doc });
+  psCall('exportBegin', { layerIds: ctx.layers.map(l => l.id), doc });
   psRun('app.documents.add(10, 10, 72, "lm-intruder"); "added"');
   try {
     const r = psCall('exportOne', j);

@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { enumerate, isExcluded } = require('../../core/variation');
+const { enumerate, isExcluded, emptyReasons } = require('../../core/variation');
 
 function cat(id, valueIds) {
   return { id, name: id, color: 'red', labelFormat: '{v}', folder: false, values: valueIds.map(v => ({ id: v, name: v, label: v })) };
@@ -51,4 +51,15 @@ test('isExcluded matches only when every pair matches', () => {
   assert.equal(isExcluded({ A: 'a1', B: 'b1' }, [{ A: 'a1' }]), true);
   assert.equal(isExcluded({ A: 'a1' }, [{}]), false);
   assert.equal(isExcluded({ A: 'a1' }, []), false);
+});
+
+test('emptyReasons lists categories without values and categories fully filtered out', () => {
+  const cats = [
+    { id: 'A', values: [{ id: 'a0' }, { id: 'a1' }] },
+    { id: 'B', values: [] },
+    { id: 'C', values: [{ id: 'c0' }] },
+  ];
+  assert.deepEqual(emptyReasons(cats, {}), { noValues: ['B'], allFiltered: [] });
+  assert.deepEqual(emptyReasons(cats, { A: [], C: ['c0'] }), { noValues: ['B'], allFiltered: ['A'] });
+  assert.deepEqual(emptyReasons(cats.filter(c => c.id !== 'B'), undefined), { noValues: [], allFiltered: [] });
 });

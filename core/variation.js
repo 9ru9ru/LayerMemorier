@@ -36,5 +36,15 @@
     return acc.filter(v => !isExcluded(v, options.excluded));
   }
 
-  return { enumerate, isExcluded };
+  // independent preview spec §3.4. 배리에이션이 0개가 되는 카테고리 쪽 이유.
+  function emptyReasons(categories, include) {
+    const noValues = [], allFiltered = [];
+    for (const c of categories) {
+      if (!c.values.length) noValues.push(c.id);
+      else if (!valueIdsFor(c, include).length) allFiltered.push(c.id);
+    }
+    return { noValues, allFiltered };
+  }
+
+  return { enumerate, isExcluded, emptyReasons };
 });

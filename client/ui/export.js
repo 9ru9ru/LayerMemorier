@@ -6,7 +6,9 @@ LMUI.export = (() => {
     const d = LMState.docData;
     const variations = LMCore.variation.enumerate(d.categories, { excluded: d.excluded, include: LMState.include });
     const built = LMCore.jobs.buildJobs(d, LMState.layers, variations);
-    return Object.assign({ variations }, built);
+    // independent preview spec §3.4: 0개면 이유를 같이 보여 준다 (이슈 #1).
+    const reasons = variations.length ? null : LMCore.variation.emptyReasons(d.categories, LMState.include);
+    return Object.assign({ variations, reasons }, built);
   }
 
   function valueName(cid, vid) {
@@ -15,15 +17,10 @@ LMUI.export = (() => {
     return (c ? c.name : cid) + '=' + (v ? v.name : vid);
   }
 
-  function layerName(id) {
-    const l = LMState.layers.find(l => l.id === id);
-    return l ? l.name : '#' + id;
-  }
-
   function warningText(w) {
     if (w.type === 'orphan') return `문서에 없는 레이어 #${w.layerId} 가 조합에 남아 있음`;
     if (w.type === 'stale') return `없는 카테고리·값을 쓰는 조합 "${LMCore.combos.comboName(w.detail.when, LMState.docData.categories)}" (내보내기에서 무시)`;
-    if (w.type === 'parentHidden') return `조합에 넣은 레이어 "${layerName(w.layerId)}" 의 부모 그룹 "${layerName(w.detail.groupId)}" 이 꺼져 있어 어떤 조합에서도 안 보임`;
+    if (w.type === 'unused') return `어느 조합에도 체크되지 않은 레이어 ${w.detail.count}개는 출력되지 않음`;
     return JSON.stringify(w);
   }
 
@@ -77,10 +74,20 @@ LMUI.export = (() => {
     return `<details class="exclude" data-open="exclude" ${openAttr('exclude', d.excluded.length > 0)}><summary>항상 뺄 조합 (PSD에 저장)</summary>${rows}<div class="row exclude-new">${selects}<button data-action="exclude-add">추가</button></div></details>`;
   }
 
+  function emptyText(r) {
+    const names = ids => ids.map(id => LMState.docData.categories.find(c => c.id === id).name).join(', ');
+    const lines = [];
+    if (r.noValues.length) lines.push(`값 없는 카테고리: ${names(r.noValues)}`);
+    if (r.allFiltered.length) lines.push(`"이번만 내보낼 값"에서 모두 끈 카테고리: ${names(r.allFiltered)}`);
+    if (!lines.length) lines.push('"항상 뺄 조합"이 모든 배리에이션을 뺐습니다');
+    return lines.map(t => `<p class="err empty-reason">${esc(t)}</p>`).join('');
+  }
+
   function previewBlock(pv) {
     const conflicts = pv.conflicts.length ? `<p class="err conflicts">충돌: 같은 파일명이 두 번 이상 나옵니다 — ${pv.conflicts.map(esc).join(', ')}</p>` : '';
     const warnings = pv.warnings.length ? `<details class="warnings" data-open="warnings" ${openAttr('warnings', false)}><summary>경고 ${pv.warnings.length}개</summary><ul class="warn">${pv.warnings.map(w => `<li>${esc(warningText(w))}</li>`).join('')}</ul></details>` : '';
-    return `<div class="row"><b>배리에이션 <span class="count">${pv.variations.length}</span>개</b></div>${conflicts}${warnings}
+    const empty = pv.reasons ? emptyText(pv.reasons) : '';
+    return `<div class="row"><b>배리에이션 <span class="count">${pv.variations.length}</span>개</b></div>${empty}${conflicts}${warnings}
       <div class="preview">${pv.jobs.map(j => esc(j.relativePath)).join('\n')}</div>`;
   }
 
@@ -131,7 +138,8 @@ LMUI.export = (() => {
     LMApp.render();
     try {
       await LMApp.saveDocData();
-      await LMHost.call('exportBegin', { layerIds: LMCore.combos.managedLayerIds(d.combos, LMState.layers), doc });
+      // independent preview spec §4.6: 모든 레이어를 건드리므로 끝나면 문서 전체 눈 상태를 되돌린다.
+      await LMHost.call('exportBegin', { layerIds: LMState.layers.map(l => l.id), doc });
       let crop = null;
       let skip = false;
       // export spec §7 3단계: 공통 영역은 모든 조합을 먼저 잰다.
@@ -190,6 +198,8 @@ LMUI.export = (() => {
       LMState.progress = null;
       try { LMExportDefaults.save(output); } catch (e) { LMApp.status(e.message); }
       try { await LMApp.refresh(); } catch (e) { LMApp.status(e.message); }
+      // 내보내는 동안 미뤄 둔 패널 미리보기를 다시 맞춘다 (캐시에 있으면 바로).
+      LMPanelPreview.request(false);
     }
   }
 

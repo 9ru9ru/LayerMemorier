@@ -45,19 +45,17 @@ const LMPreview = (() => {
     if (!p || LMState.exporting) return;
     const v = variation();
     if (!v) return;
-    const combos = LMState.docData.combos;
-    const managed = LMCore.combos.managedLayerIds(combos, LMState.layers);
-    const onSet = new Set(LMCore.combos.onLayerIds(combos, v));
-    for (const id of managed) if (p.touched.indexOf(id) === -1) p.touched.push(id);
+    // independent preview spec §4.5: 내보내기와 같은 규칙 — 체크한 레이어 + 조상만 켜고 나머지는 전부 끈다.
+    const all = LMState.layers.map(l => l.id);
+    const visible = new Set(LMCore.combos.visibleLayerIds(LMState.docData.combos, LMState.layers, v));
+    const seen = new Set(p.touched);
+    for (const id of all) if (!seen.has(id)) p.touched.push(id);
     // 다른 문서에 갔다 오면 조합 선택이 비워진다. 캔버스와 맞게 되돌릴 수 있도록 기억한다 (state.js refresh).
     p.combo = Object.assign({}, LMState.combo);
-    const on = managed.filter(id => onSet.has(id));
-    const off = managed.filter(id => !onSet.has(id));
-    await setVisibility(on, off);
+    await setVisibility(all.filter(id => visible.has(id)), all.filter(id => !visible.has(id)));
     // 보낸 그대로 패널의 눈 상태를 고친다. 레이어 전체를 다시 읽으면(getLayers) 수백 개일 때
     // 클릭마다 1초가 넘게 걸린다.
-    const managedSet = new Set(managed);
-    for (const l of LMState.layers) if (managedSet.has(l.id)) l.visible = onSet.has(l.id);
+    for (const l of LMState.layers) l.visible = visible.has(l.id);
   }
 
   async function enable() {
