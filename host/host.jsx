@@ -670,6 +670,66 @@ var LM = LM || {};
     return { ok: true };
   });
 
+  // ---- panel preview (independent preview spec 5.2) ----
+
+  var previewCleaned = false;
+
+  function previewFolder() {
+    var f = new Folder(Folder.temp.fsName + '/LayerMemorier');
+    if (!f.exists) f.create();
+    return f;
+  }
+
+  // itemIndex < count: there are history states after the current one (redo).
+  // Reverting to the saved state below would throw them away, so refuse instead.
+  function hasRedo() {
+    var r = new ActionReference();
+    r.putEnumerated(cid('HstS'), cid('Ordn'), cid('CrnH'));
+    var d = executeActionGet(r);
+    return d.getInteger(cid('ItmI')) < d.getInteger(cid('Cnt '));
+  }
+
+  // Merged picture of one variation, at most maxSize px on the long side, as a temp PNG.
+  // The visibility change is one history step that is reverted afterwards, so the
+  // document and its history look untouched.
+  LM.renderPreview = wrap(function (a) {
+    if (!hasDoc()) throw new Error('no document');
+    activateExpected(a.doc);
+    var doc = app.activeDocument;
+    var started = new Date().getTime();
+    var folder = previewFolder();
+    if (!previewCleaned) {
+      var old = folder.getFiles('preview_*.png');
+      for (var i = 0; i < old.length; i++) {
+        try { old[i].remove(); } catch (e) {}
+      }
+      previewCleaned = true;
+    }
+    if (hasRedo()) throw new Error('LM_REDO_PENDING');
+    var file = new File(folder.fsName + '/preview_' + started + '.png');
+    var size = null;
+    var saved = doc.activeHistoryState;
+    withoutDialogs(function () {
+      try {
+        applyVisibilityAs('LayerMemorier preview', a.on, a.off);
+        withMergedDuplicate(doc, 'lm_preview_tmp', function (dup) {
+          var w = dup.width.as('px');
+          var h = dup.height.as('px');
+          var k = Math.min(1, a.maxSize / Math.max(w, h));
+          if (k < 1) {
+            dup.resizeImage(px(Math.max(1, Math.round(w * k))), px(Math.max(1, Math.round(h * k))), undefined, ResampleMethod.BICUBICSHARPER);
+          }
+          sfwPng24(file, { interlaced: false, transparency: true, matte: 'none' });
+          size = { width: dup.width.as('px'), height: dup.height.as('px') };
+        });
+      } finally {
+        doc.activeHistoryState = saved;
+      }
+    });
+    if (!file.exists) throw new Error('preview save failed, file not found: ' + file.fsName);
+    return { path: String(file.fsName).replace(/\\/g, '/'), width: size.width, height: size.height, ms: new Date().getTime() - started };
+  });
+
   // Keys match the panel's docKey: full path when saved, otherwise the name.
   LM.getOpenDocKeys = wrap(function () {
     var keys = [];
