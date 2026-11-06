@@ -19,7 +19,17 @@ foreach ($i in @('CSXS', 'client', 'core', 'host', 'install', 'README.md', '.deb
 }
 
 if (Test-Path $zip) { Remove-Item $zip -Force }
-Compress-Archive -Path $pkg -DestinationPath $zip
+# Windows PowerShell 5.1의 Compress-Archive는 항목 경로에 역슬래시를 써서, Windows 밖에서는 폴더가 풀리지 않을 수 있다.
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$archive = [IO.Compression.ZipFile]::Open($zip, 'Create')
+try {
+    foreach ($f in Get-ChildItem $stage -Recurse -File -Force) {
+        $name = $f.FullName.Substring($stage.Length + 1).Replace('\', '/')
+        [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $f.FullName, $name)
+    }
+} finally {
+    $archive.Dispose()
+}
 Remove-Item $stage -Recurse -Force
 
 $kb = [math]::Round((Get-Item $zip).Length / 1KB)
