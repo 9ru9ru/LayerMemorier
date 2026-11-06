@@ -35,7 +35,8 @@ LMUI.layers = (() => {
   function toggleBar() {
     const panel = `<label class="preview-toggle" title="레이어 탭 왼쪽에 지금 조합을 그립니다 (큰 문서는 한 번에 몇 초 걸릴 수 있음)"><input type="checkbox" class="panel-preview-switch" ${LMPanelPreview.isOn() ? 'checked' : ''}> 패널 미리보기</label>`;
     const reset = `<button class="danger reset" data-action="combos-reset" ${LMState.docData.combos.length ? '' : 'disabled'} title="모든 조합의 레이어 켜짐·꺼짐 정보를 지웁니다 (카테고리·내보내기 설정은 그대로)">초기화</button>`;
-    return `<div class="row made">${panel}${LMPreview.toggleHtml()}${reset}</div>`;
+    const quality = LMPanelPreview.isOn() ? LMPanelPreview.qualityHtml() : '';
+    return `<div class="row made">${panel}${quality}${LMPreview.toggleHtml()}${reset}</div>`;
   }
 
   // 조합 복사·붙여넣기: 한 조합에서 켜진 레이어를 다른 조합에 그대로 (붙여넣으면 대상이 똑같아진다).
@@ -280,6 +281,11 @@ LMUI.layers = (() => {
     if (panelSw) {
       LMPanelPreview.setOn(panelSw.checked);
       LMApp.render();
+      return LMPanelPreview.request(false);
+    }
+    const quality = e.target.closest('#tab-layers select.panel-preview-quality');
+    if (quality) {
+      LMPanelPreview.setQuality(Number(quality.value));
       return LMPanelPreview.request(false);
     }
     const sw = e.target.closest('#tab-layers input.preview-switch');

@@ -36,6 +36,16 @@ test('renderPreview keeps a small document at its size', () => {
   assert.ok(!ps.log.some(e => e[0] === 'resize'));
 });
 
+test('renderPreview downsizes the lower qualities with bilinear and the top quality with Bicubic Sharper', () => {
+  for (const [maxSize, method] of [[256, 'BILINEAR'], [512, 'BILINEAR'], [1024, 'BICUBICSHARPER']]) {
+    const { LM, ps } = loadHost({ width: 12000, height: 13500 });
+    const r = call(LM, 'renderPreview', { doc: ps.docRef, on: [1], off: [], maxSize });
+    assert.ok(!r.error, r.error);
+    assert.equal(r.height, maxSize);
+    assert.equal(ps.log.find(e => e[0] === 'resize')[3], method, `maxSize ${maxSize}`);
+  }
+});
+
 test('renderPreview refuses when redo states exist and touches nothing', () => {
   const { LM, ps } = loadHost({ width: 100, height: 100, history: { states: ['Open', 'Brush', 'Brush', 'Move', 'Brush'], index: 2 } });
   const r = call(LM, 'renderPreview', { doc: ps.docRef, on: [1], off: [2], maxSize: 1024 });

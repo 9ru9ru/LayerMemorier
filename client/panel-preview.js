@@ -4,7 +4,14 @@ const LMPanelPreview = (() => {
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const KEY_ON = 'lm.panelPreview';
   const KEY_SPLIT = 'lm.previewSplit';
-  const MAX_SIZE = 1024;
+  const KEY_QUALITY = 'lm.previewQuality';
+  // 긴 변 픽셀. 낮을수록 줄이기·저장이 빨라진다. 합치기는 항상 원본 크기라 그 시간은 그대로다 (host.jsx renderPreview).
+  const QUALITIES = [
+    { size: 256, label: '낮음 (256px)' },
+    { size: 512, label: '중간 (512px)' },
+    { size: 1024, label: '높음 (1024px)' },
+  ];
+  const DEFAULT_QUALITY = 1024;
   const MESSAGES = {
     LM_REDO_PENDING: '다시 실행할 단계가 있어 미리보기를 미룹니다 (작업을 하나 하거나 다시 그리기)',
   };
@@ -15,7 +22,7 @@ const LMPanelPreview = (() => {
   const memory = {};
   let signature = null;
   let wanted = null;   // 지금 보여야 할 그림의 캐시 키. 늦게 끝난 이전 그리기가 덮어쓰지 않게 한다.
-  const state = { path: '', label: '', busy: false, error: '' };
+  const state = { path: '', label: '', busy: false, error: '', ms: null };
 
   function read(key) {
     try {
@@ -34,6 +41,11 @@ const LMPanelPreview = (() => {
   function setOn(on) { write(KEY_ON, on ? '1' : '0'); }
   function ratio() { return Number(read(KEY_SPLIT)) || 0.4; }
   function setRatio(r) { write(KEY_SPLIT, r); }
+  function quality() {
+    const q = Number(read(KEY_QUALITY));
+    return QUALITIES.some(x => x.size === q) ? q : DEFAULT_QUALITY;
+  }
+  function setQuality(size) { write(KEY_QUALITY, size); }
 
   function message(e) {
     const m = /LM_[A-Z0-9_]+/.exec(e.message);
@@ -48,14 +60,16 @@ const LMPanelPreview = (() => {
     const visible = new Set(LMCore.combos.visibleLayerIds(d.combos, LMState.layers, v));
     const all = LMState.layers.map(l => l.id);
     const on = all.filter(id => visible.has(id));
-    // 같은 레이어 구조에서 그림은 켜진 레이어로 정해진다 (구조가 바뀌면 onRefresh가 캐시를 비운다).
-    return { on, off: all.filter(id => !visible.has(id)), key: on.join(','), label: LMCore.combos.comboName(v, d.categories), docKey: LMState.docKey };
+    // 같은 레이어 구조에서 그림은 화질과 켜진 레이어로 정해진다 (구조가 바뀌면 onRefresh가 캐시를 비운다).
+    const maxSize = quality();
+    return { on, off: all.filter(id => !visible.has(id)), maxSize, key: maxSize + '|' + on.join(','), label: LMCore.combos.comboName(v, d.categories), docKey: LMState.docKey };
   }
 
   function show(path, label) {
     state.path = path;
     state.label = label;
     state.error = '';
+    state.ms = null; // 캐시에서 꺼낸 그림은 그리는 데 걸린 시간이 없다.
     paint();
   }
 
@@ -93,11 +107,11 @@ const LMPanelPreview = (() => {
     LMApp.muteEcho();
     LMState.previewing = true;
     try {
-      const r = await LMHost.call('renderPreview', { doc, on: t.on, off: t.off, maxSize: MAX_SIZE });
+      const r = await LMHost.call('renderPreview', { doc, on: t.on, off: t.off, maxSize: t.maxSize });
       // 그리는 사이 문서가 바뀌었으면 버린다. 레이어 id는 문서마다 겹쳐 같은 캐시 키가 될 수 있다 (#3).
       if (t.docKey !== LMState.docKey) return;
       cache.set(t.key, r.path);
-      if (t.key === wanted) { state.path = r.path; state.error = ''; }
+      if (t.key === wanted) { state.path = r.path; state.error = ''; state.ms = r.ms; }
     } catch (e) {
       if (t.key === wanted && t.docKey === LMState.docKey) state.error = message(e);
     } finally {
@@ -119,6 +133,7 @@ const LMPanelPreview = (() => {
       state.path = '';
       state.label = '';
       state.error = '';
+      state.ms = null;
     }
     if (!LMState.docData) return Promise.resolve();
     const sig = LMCore.combos.layerSignature(LMState.layers);
@@ -136,9 +151,17 @@ const LMPanelPreview = (() => {
     const img = state.path && !state.error ? `<img src="${esc(fileUrl(state.path))}" alt="">` : '';
     const err = state.error ? `<p class="err">${esc(state.error)}</p>` : '';
     const busy = state.busy ? '<div class="pv-busy">그리는 중…</div>' : '';
-    return `<div class="pv-pane"><div class="pv-head"><span class="pv-label" title="${esc(state.label)}">${esc(state.label)}</span>` +
+    const time = state.ms != null && !state.busy && !state.error
+      ? `<span class="pv-time" title="이 그림을 그리는 데 걸린 시간">${(state.ms / 1000).toFixed(1)}초</span>` : '';
+    return `<div class="pv-pane"><div class="pv-head"><span class="pv-label" title="${esc(state.label)}">${esc(state.label)}</span>${time}` +
       `<button data-action="pv-redraw" title="붓질처럼 포토샵이 패널에 알리지 않는 변경을 반영합니다">다시 그리기</button></div>` +
       `<div class="pv-body${state.busy ? ' busy' : ''}">${img}${err}${busy}</div></div>`;
+  }
+
+  function qualityHtml() {
+    const cur = quality();
+    const opts = QUALITIES.map(q => `<option value="${q.size}"${q.size === cur ? ' selected' : ''}>${q.label}</option>`).join('');
+    return `<label class="preview-toggle" title="낮을수록 빨리 그립니다 (합치는 시간은 그대로라 큰 문서는 차이가 작을 수 있음)">화질<select class="panel-preview-quality">${opts}</select></label>`;
   }
 
   // 레이어 탭 전체를 다시 그리지 않고 그림 영역만 바꾼다 (트리 스크롤·선택을 건드리지 않음).
@@ -147,5 +170,5 @@ const LMPanelPreview = (() => {
     if (el && el.parentNode) el.outerHTML = paneHtml();
   }
 
-  return { isOn, setOn, ratio, setRatio, request, onRefresh, paneHtml, state };
+  return { isOn, setOn, ratio, setRatio, quality, setQuality, qualityHtml, request, onRefresh, paneHtml, state };
 })();

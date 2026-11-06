@@ -681,6 +681,9 @@ var LM = LM || {};
   }
 
   var PREVIEW_STEP = 'LayerMemorier preview';
+  // At or below this long side the picture is a draft: bilinear costs less than
+  // Bicubic Sharper on a huge merged copy. The merge itself is always full size.
+  var PREVIEW_DRAFT_MAX = 512;
 
   function currentHistoryRef() {
     var r = new ActionReference();
@@ -749,7 +752,8 @@ var LM = LM || {};
           var h = dup.height.as('px');
           var k = Math.min(1, a.maxSize / Math.max(w, h));
           if (k < 1) {
-            dup.resizeImage(px(Math.max(1, Math.round(w * k))), px(Math.max(1, Math.round(h * k))), undefined, ResampleMethod.BICUBICSHARPER);
+            var method = a.maxSize <= PREVIEW_DRAFT_MAX ? ResampleMethod.BILINEAR : ResampleMethod.BICUBICSHARPER;
+            dup.resizeImage(px(Math.max(1, Math.round(w * k))), px(Math.max(1, Math.round(h * k))), undefined, method);
           }
           sfwPng24(file, { interlaced: false, transparency: true, matte: 'none' });
           size = { width: dup.width.as('px'), height: dup.height.as('px') };

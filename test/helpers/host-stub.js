@@ -50,7 +50,7 @@ function loadHost(opts = {}) {
   };
   doc.duplicate = (name) => {
     const dup = makeDoc(name, o.width, o.height);
-    dup.resizeImage = (w, h) => { dup.width = unit(w.value); dup.height = unit(h.value); ps.log.push(['resize', w.value, h.value]); };
+    dup.resizeImage = (w, h, res, method) => { dup.width = unit(w.value); dup.height = unit(h.value); ps.log.push(['resize', w.value, h.value, method]); };
     dup.close = () => { ps.closedDuplicates++; };
     app.activeDocument = dup;
     return dup;
@@ -116,7 +116,7 @@ function loadHost(opts = {}) {
     ActionDescriptor: Store, ActionReference: Store, ActionList: Store,
     UnitValue: function (v) { this.value = v; this.as = () => v; },
     Units: { PIXELS: 'PX' }, DialogModes: { NO: 'NO', ALL: 'ALL' },
-    ResampleMethod: { BICUBICSHARPER: 'BICUBICSHARPER' }, SaveOptions: { DONOTSAVECHANGES: 'NO' },
+    ResampleMethod: { BICUBICSHARPER: 'BICUBICSHARPER', BILINEAR: 'BILINEAR' }, SaveOptions: { DONOTSAVECHANGES: 'NO' },
     AnchorPosition: { MIDDLECENTER: 'MC' },
   });
   vm.runInContext(fs.readFileSync(HOST, 'utf8'), ctx, { filename: 'host.jsx' });

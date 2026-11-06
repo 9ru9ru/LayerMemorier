@@ -201,6 +201,105 @@ test('the toggle and split ratio are remembered in localStorage', () => {
   assert.equal(first.ctx.LMPanelPreview.ratio(), 0.55);
 });
 
+// ---- 패널 미리보기 화질 ----
+
+// 그리기 호출의 maxSize를 모으고, 호출마다 다른 파일을 돌려준다.
+function captureRenders(ctx, ms = 1) {
+  const sizes = [];
+  ctx.LMHost.call = async (fn, arg) => {
+    if (fn === 'renderPreview') sizes.push(arg.maxSize);
+    return { path: 'C:/t/p' + sizes.length + '.png', width: 1, height: 1, ms };
+  };
+  return sizes;
+}
+
+test('the picked preview quality is the size the host renders at', async () => {
+  const { ctx } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [], layers: [L(1, null)] });
+  const sizes = captureRenders(ctx);
+  ctx.LMPanelPreview.setOn(true);
+  ctx.LMPanelPreview.setQuality(512);
+  await ctx.LMPanelPreview.request(false);
+  assert.deepEqual(sizes, [512]);
+});
+
+test('changing quality redraws the same combo, and going back to a drawn quality comes from the cache', async () => {
+  const { ctx } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [], layers: [L(1, null)] });
+  const sizes = captureRenders(ctx);
+  ctx.LMPanelPreview.setOn(true);
+  await ctx.LMPanelPreview.request(false);
+  ctx.LMPanelPreview.setQuality(256);
+  await ctx.LMPanelPreview.request(false);
+  assert.match(ctx.LMPanelPreview.paneHtml(), /p2\.png/);
+  ctx.LMPanelPreview.setQuality(1024);
+  await ctx.LMPanelPreview.request(false);
+  assert.deepEqual(sizes, [1024, 256]);
+  assert.match(ctx.LMPanelPreview.paneHtml(), /p1\.png/);
+});
+
+test('the quality is remembered in localStorage, and a stored value that is not offered falls back to 1024', async () => {
+  const { ctx } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [], layers: [L(1, null)] });
+  const sizes = captureRenders(ctx);
+  ctx.LMPanelPreview.setOn(true);
+  ctx.LMPanelPreview.setQuality(256);
+  assert.equal(ctx.localStorage.getItem('lm.previewQuality'), '256');
+  ctx.localStorage.setItem('lm.previewQuality', '9999');
+  await ctx.LMPanelPreview.request(false);
+  assert.deepEqual(sizes, [1024]);
+});
+
+test('the quality still applies for the session when localStorage throws', async () => {
+  const { ctx } = loadPanel({ storage: 'throw' });
+  setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [], layers: [L(1, null)] });
+  const sizes = captureRenders(ctx);
+  ctx.LMPanelPreview.setOn(true);
+  ctx.LMPanelPreview.setQuality(256);
+  await ctx.LMPanelPreview.request(false);
+  assert.deepEqual(sizes, [256]);
+});
+
+test('the layer tab offers the quality picker only while the panel preview is on, with the current value selected', () => {
+  const { ctx, el } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [], layers: [L(1, null)] });
+  ctx.LMHost.call = async () => ({ path: 'C:/t/p.png', width: 1, height: 1, ms: 1 });
+  const off = el(900);
+  ctx.LMUI.layers.render(off);
+  assert.doesNotMatch(off.innerHTML, /panel-preview-quality/);
+  ctx.LMPanelPreview.setOn(true);
+  ctx.LMPanelPreview.setQuality(512);
+  const on = el(900);
+  ctx.LMUI.layers.render(on);
+  assert.match(on.innerHTML, /<option value="512" selected>/);
+  assert.doesNotMatch(on.innerHTML, /<option value="1024" selected>/);
+});
+
+test('the pane shows how long the last render took, but no time for a picture from the cache', async () => {
+  const { ctx } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', ['a0', 'a1'])], combos: [{ when: { A: 'a1' }, layers: [2] }], layers: [L(1, null), L(2, null)] });
+  captureRenders(ctx, 1500);
+  ctx.LMPanelPreview.setOn(true);
+  await ctx.LMPanelPreview.request(false);
+  assert.match(ctx.LMPanelPreview.paneHtml(), /1\.5초/);
+  ctx.LMState.combo = { A: 'a1' };
+  await ctx.LMPanelPreview.request(false);
+  ctx.LMState.combo = {};
+  await ctx.LMPanelPreview.request(false);
+  assert.doesNotMatch(ctx.LMPanelPreview.paneHtml(), /\d초/);
+});
+
+test('with the panel preview off, a combo change and a document refresh never render', async () => {
+  const { ctx } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', ['a0', 'a1'])], combos: [], layers: [L(1, null)] });
+  const sizes = captureRenders(ctx);
+  ctx.LMState.combo = { A: 'a1' };
+  await ctx.LMUI.layers.afterComboChange();
+  await ctx.LMPanelPreview.onRefresh(true);
+  await new Promise(r => setTimeout(r, 0));
+  assert.deepEqual(sizes, []);
+});
+
 test('a queued render for a combo the user already left is skipped (only the shown one renders)', async () => {
   const { ctx } = loadPanel();
   setupDoc(ctx, { categories: [cat('A', ['a', 'b', 'c'])], combos: [{ when: { A: 'b' }, layers: [2] }, { when: { A: 'c' }, layers: [3] }], layers: [L(1, null), L(2, null), L(3, null)] });

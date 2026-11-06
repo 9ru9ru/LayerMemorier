@@ -45,6 +45,13 @@ test('renderPreview draws the variation and leaves eyes and history untouched, m
   assert.deepEqual(eyes(), eyesBefore);
 });
 
+test('renderPreview at a lower quality downsizes with bilinear', () => {
+  const { docData, args } = setup();
+  const r = psCall('renderPreview', Object.assign(args(enumerate(docData.categories)[0]), { maxSize: 120 }));
+  assert.deepEqual([r.width, r.height], [120, 80]);
+  assert.ok(fs.existsSync(r.path));
+});
+
 test('renderPreview with every layer off saves an empty picture', () => {
   const { args } = setup();
   const a = args({});
