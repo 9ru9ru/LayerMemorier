@@ -111,6 +111,7 @@ const LMApp = {
       // 닫힌 문서의 미리보기 스냅샷은 버린다 (combos spec §6.3). 미리보기가 켜진 문서로
       // 돌아왔으면 캔버스에 반영된 조합으로 선택을 되돌린다 (위에서 {}로 비웠으므로).
       LMPreview.prune(openKeys);
+      LMPanelPreview.prune(openKeys);
       if (fresh && key && LMState.previews[key]) LMState.combo = Object.assign({}, LMState.previews[key].combo);
       // 조합 선택(미리보기 기억에서 되돌린 것 포함)에 지금 없는 카테고리·값 키가 남지 않게 한다.
       if (docData) LMState.combo = LMCore.combos.cleanWhen(LMState.combo, docData.categories);

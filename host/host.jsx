@@ -79,7 +79,8 @@ var LM = LM || {};
       move: cid('move'),
       docActivate: sid('documentAfterActivate'),
       close: cid('Cls '),
-      set: cid('setd')
+      set: cid('setd'),
+      save: cid('save')
     };
   });
 
@@ -790,13 +791,26 @@ var LM = LM || {};
 
   // ---- fast preview: one picture per layer, composited by the panel ----
 
+  // Modified time and size of the document's file; null when it has no file yet.
+  function fileStamp(d) {
+    try {
+      var f = d.fullName;
+      return f.modified.getTime() + ':' + f.length;
+    } catch (e) {
+      return null;
+    }
+  }
+
   function historyMark() {
     var d = executeActionGet(currentHistoryRef());
+    var doc = app.activeDocument;
     return {
       id: d.hasKey(sid('ID')) ? d.getInteger(sid('ID')) : null,
       index: d.getInteger(cid('ItmI')),
       count: d.getInteger(cid('Cnt ')),
-      name: d.getString(cid('Nm  '))
+      name: d.getString(cid('Nm  ')),
+      saved: doc.saved,
+      stamp: fileStamp(doc)
     };
   }
 
@@ -807,7 +821,7 @@ var LM = LM || {};
   });
 
   // Each unit shown alone (with its parent groups) on a transparent canvas of the document's
-  // shape, as a temp PNG. Hides everything once, then each unit is a history step deleted
+  // shape, as a PNG in a.folder (kept between sessions) or the temp folder. Hides everything once, then each unit is a history step deleted
   // right after its picture, so at most two steps exist at a time.
   // Stops after budgetMs so Photoshop can take input between calls; always finishes one unit.
   // Unlike renderPreview this refuses another active document: it runs many times in a row
@@ -819,6 +833,10 @@ var LM = LM || {};
     var started = new Date().getTime();
     var folder = previewFolder();
     cleanPreviewFolder(folder);
+    if (a.folder) {
+      folder = new Folder(a.folder);
+      ensureFolder(folder);
+    }
     if (hasRedo()) throw new Error('LM_REDO_PENDING');
     var before = historyMark();
     var done = [];

@@ -130,7 +130,7 @@ test('turning the panel preview on renders once, then serves the same combo from
   assert.equal(renders.length, 2);
   assert.deepEqual(arr(renders[1][1].on), [2]);
   assert.deepEqual(arr(renders[1][1].off), [1]);
-  assert.equal(renders[0][1].maxSize, 1000, 'default 10% of the 10000px long side');
+  assert.equal(renders[0][1].maxSize, 1500, 'default 15% of the 10000px long side');
   assert.match(ctx.LMPanelPreview.paneHtml(), /file:\/\/\/C:\/t\/preview_1\.png/);
 });
 
@@ -232,22 +232,32 @@ test('changing the percent redraws the same combo, and going back to a drawn per
   ctx.LMPanelPreview.setPercent(5);
   await ctx.LMPanelPreview.request(false);
   assert.match(ctx.LMPanelPreview.paneHtml(), /p2\.png/);
-  ctx.LMPanelPreview.setPercent(10);
+  ctx.LMPanelPreview.setPercent(15);
   await ctx.LMPanelPreview.request(false);
-  assert.deepEqual(sizes, [1000, 500]);
+  assert.deepEqual(sizes, [1500, 500]);
   assert.match(ctx.LMPanelPreview.paneHtml(), /p1\.png/);
 });
 
-test('the percent is remembered in localStorage, and a stored value that is not a number falls back to 10%', async () => {
+test('the percent is remembered in localStorage, and a stored value that is not a number falls back to 15%', async () => {
   const { ctx } = loadPanel();
   setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [], layers: [L(1, null)] });
   const sizes = captureRenders(ctx);
   ctx.LMPanelPreview.setOn(true);
   ctx.LMPanelPreview.setPercent(25);
-  assert.equal(ctx.localStorage.getItem('lm.previewPercent'), '25');
-  ctx.localStorage.setItem('lm.previewPercent', 'abc');
+  assert.equal(ctx.localStorage.getItem('lm.previewFixedPercent'), '25');
+  ctx.localStorage.setItem('lm.previewFixedPercent', 'abc');
   await ctx.LMPanelPreview.request(false);
-  assert.deepEqual(sizes, [1000]);
+  assert.deepEqual(sizes, [1500]);
+});
+
+test('a percent chosen with the old slider does not carry over: quality starts at the fixed 15%', async () => {
+  const { ctx } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [], layers: [L(1, null)] });
+  const sizes = captureRenders(ctx);
+  ctx.localStorage.setItem('lm.previewPercent', '60');
+  ctx.LMPanelPreview.setOn(true);
+  await ctx.LMPanelPreview.request(false);
+  assert.deepEqual(sizes, [1500]);
 });
 
 test('the percent still applies for the session when localStorage throws', async () => {
@@ -260,7 +270,7 @@ test('the percent still applies for the session when localStorage throws', async
   assert.deepEqual(sizes, [500]);
 });
 
-test('the layer tab shows the quality slider and number only while the panel preview is on, with the result size', () => {
+test('the layer tab shows the quality number, without a slider, only while the panel preview is on, with the result size', () => {
   const { ctx, el } = loadPanel();
   setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [], layers: [L(1, null)] });
   ctx.LMHost.call = async () => ({ path: 'C:/t/p.png', width: 1, height: 1, ms: 1 });
@@ -271,18 +281,16 @@ test('the layer tab shows the quality slider and number only while the panel pre
   ctx.LMPanelPreview.setPercent(25);
   const on = el(900);
   ctx.LMUI.layers.render(on);
-  assert.match(on.innerHTML, /type="range"[^>]*value="25"/);
   assert.match(on.innerHTML, /type="number"[^>]*value="25"/);
+  assert.doesNotMatch(on.innerHTML, /type="range"/);
   assert.match(on.innerHTML, /2500×2000px/);
 });
 
-// 화질 칸 하나를 흉내 낸다. 리스너는 target.closest로 칸 묶음을 찾고 querySelector로 나머지 칸을 고친다.
+// 화질 칸을 흉내 낸다. 리스너는 target.closest로 칸 묶음을 찾고 querySelector로 크기 표시를 고친다.
 function qualityBox() {
-  const fields = { range: { value: '10' }, num: { value: '10' }, px: { textContent: '' } };
-  const box = { querySelector: s => (s.includes('range') ? fields.range : s.includes('num') ? fields.num : fields.px) };
-  for (const f of [fields.range, fields.num]) {
-    f.closest = s => (s.includes('pv-quality') ? box : s === '#tab-layers' ? {} : null);
-  }
+  const fields = { num: { value: '15' }, px: { textContent: '' } };
+  const box = { querySelector: s => (s.includes('num') ? fields.num : fields.px) };
+  fields.num.closest = s => (s.includes('pv-quality') ? box : s === '#tab-layers' ? {} : null);
   return fields;
 }
 async function fireDoc(ctx, type, target) {
@@ -290,22 +298,22 @@ async function fireDoc(ctx, type, target) {
   await new Promise(r => setTimeout(r, 0));
 }
 
-test('dragging the slider only updates the fields, and releasing it renders once', async () => {
+test('typing a percent only updates the shown size, and finishing the input renders once', async () => {
   const { ctx } = loadPanel();
   setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [], layers: [L(1, null)] });
   const sizes = captureRenders(ctx);
   ctx.LMPanelPreview.setOn(true);
   const f = qualityBox();
-  for (const v of ['20', '30']) {
-    f.range.value = v;
-    await fireDoc(ctx, 'input', f.range);
+  for (const v of ['2', '20']) {
+    f.num.value = v;
+    await fireDoc(ctx, 'input', f.num);
   }
-  assert.deepEqual(sizes, [], 'no render while dragging');
-  assert.equal(f.num.value, 30);
-  assert.equal(f.px.textContent, '3000×2400px');
-  await fireDoc(ctx, 'change', f.range);
-  assert.deepEqual(sizes, [3000]);
-  assert.equal(ctx.localStorage.getItem('lm.previewPercent'), '30');
+  assert.deepEqual(sizes, [], 'no render while typing');
+  assert.equal(f.num.value, '20', 'typing is not rewritten mid-way');
+  assert.equal(f.px.textContent, '2000×1600px');
+  await fireDoc(ctx, 'change', f.num);
+  assert.deepEqual(sizes, [2000]);
+  assert.equal(ctx.localStorage.getItem('lm.previewFixedPercent'), '20');
 });
 
 test('a typed percent is clamped when committed, and a blank one restores the current value without a new render', async () => {
@@ -317,7 +325,6 @@ test('a typed percent is clamped when committed, and a blank one restores the cu
   f.num.value = '250';
   await fireDoc(ctx, 'input', f.num);
   assert.equal(f.num.value, '250', 'typing is not rewritten mid-way');
-  assert.equal(f.range.value, 100);
   await fireDoc(ctx, 'change', f.num);
   assert.equal(f.num.value, 100);
   assert.deepEqual(sizes, [8192], '100% of 10000px, capped at the save limit');
@@ -325,7 +332,6 @@ test('a typed percent is clamped when committed, and a blank one restores the cu
   await fireDoc(ctx, 'input', f.num);
   await fireDoc(ctx, 'change', f.num);
   assert.equal(f.num.value, 100);
-  assert.equal(f.range.value, 100);
   assert.deepEqual(sizes, [8192]);
 });
 
@@ -358,7 +364,7 @@ test('with the panel preview off, a combo change and a document refresh never re
 
 // 호스트 흉내: 레이어 그림 호출을 모으고, 한 번에 batch개까지만 끝낸다. 히스토리 표시는 mark로 바꿀 수 있다.
 function fastHost(ctx, { batch = 100 } = {}) {
-  const host = { calls: [], units: [], mark: { id: 1, index: 5, count: 5, name: 'Brush' } };
+  const host = { calls: [], units: [], folders: [], mark: { id: 1, index: 5, count: 5, name: 'Brush' } };
   ctx.LMHost.call = async (fn, arg) => {
     if (fn === 'getHistoryMark') return host.mark;
     if (fn === 'getLayers') return ctx.LMState.layers;
@@ -370,7 +376,11 @@ function fastHost(ctx, { batch = 100 } = {}) {
     if (fn !== 'renderLayerPictures') return { path: 'C:/t/exact.png', width: 1, height: 1, ms: 1 };
     const todo = Array.from(arg.units).slice(0, batch);
     host.units.push(todo.map(u => Array.from(u.on)));
-    return { done: todo.map(u => ({ key: u.key, path: 'C:/t/u' + Array.from(u.on).join('_') + '.png' })), before: host.mark, after: host.mark, ms: 500 };
+    host.folders.push(arg.folder);
+    const dir = arg.folder || 'C:/t';
+    const done = todo.map(u => ({ key: u.key, path: dir + '/u' + Array.from(u.on).join('_') + '.png' }));
+    if (arg.folder) for (const d of done) ctx.cepFiles[d.path] = '';
+    return { done, before: host.mark, after: host.mark, ms: 500 };
   };
   return host;
 }
@@ -719,7 +729,7 @@ test('the layer tab shows the prepare button with fast mode, and cancel while it
   fastHost(ctx, { batch: 1 });
   const idle = el(900);
   ctx.LMUI.layers.render(idle);
-  assert.match(idle.innerHTML, /data-action="pv-prepare-all"/);
+  assert.match(idle.innerHTML, /class="primary pv-prepare" data-action="pv-prepare-all"[^>]*>레이어 준비</);
   const done = ctx.LMPanelPreview.prepareAll();
   const running = el(900);
   ctx.LMUI.layers.render(running);
@@ -733,15 +743,180 @@ test('the layer tab shows the prepare button with fast mode, and cancel while it
   assert.doesNotMatch(exact.innerHTML, /pv-prepare/);
 });
 
-test('a new document drops the pictures of the old one', async () => {
+test('going to another document and back keeps the pictures of the first one', async () => {
   const { ctx } = loadPanel();
   fastDoc(ctx, [1]);
   const host = fastHost(ctx);
   await ctx.LMPanelPreview.request(false);
   await settle();
+  ctx.LMState.docKey = 'C:/b.psd';
+  ctx.LMState.docInfo = { name: 'b.psd', path: 'C:/b.psd', width: 10000, height: 8000 };
   await ctx.LMPanelPreview.onRefresh(true);
   await settle();
-  assert.deepEqual(host.units.length, 2);
+  assert.equal(host.units.length, 2, 'layer ids repeat across documents, so the other document extracts its own');
+  ctx.LMState.docKey = 'C:/a.psd';
+  ctx.LMState.docInfo = { name: 'a.psd', path: 'C:/a.psd', width: 10000, height: 8000 };
+  await ctx.LMPanelPreview.onRefresh(true);
+  await settle();
+  assert.equal(host.units.length, 2, 'back on the first document nothing is extracted again');
+});
+
+// ---- 빠른 그리기: 디스크 보관 ----
+
+const clean = (id, stamp) => ({ id, index: id, count: id, name: 'Brush', saved: true, stamp });
+const unsaved = (id, stamp) => ({ id, index: id, count: id, name: 'Brush', saved: false, stamp });
+
+async function preparedPanel(files, mark) {
+  const { ctx } = loadPanel({ files });
+  fastDoc(ctx, [1]);
+  const host = fastHost(ctx);
+  host.mark = mark;
+  await ctx.LMPanelPreview.prepareAll();
+  await settle();
+  return { ctx, host };
+}
+
+async function reopened(files, mark) {
+  const { ctx } = loadPanel({ files });
+  fastDoc(ctx, [1]);
+  const host = fastHost(ctx);
+  host.mark = mark;
+  await ctx.LMPanelPreview.request(false);
+  await settle();
+  return { ctx, host };
+}
+
+test('pictures are saved under the user data folder for a document with a file', async () => {
+  const files = {};
+  const { host } = await preparedPanel(files, clean(1, 'S'));
+  assert.ok(host.folders.every(f => /\/LayerMemorier\/preview-cache\/[0-9a-z]+$/.test(f)), host.folders.join());
+  assert.ok(Object.keys(files).some(f => f.endsWith('/index.json')));
+});
+
+test('reopening an unchanged file uses the saved pictures, with no extraction at all', async () => {
+  const files = {};
+  await preparedPanel(files, clean(1, 'S'));
+  const { ctx, host } = await reopened(files, clean(1, 'S'));
+  assert.equal(host.calls.length, 0);
+  assert.deepEqual(lastDraw(ctx), [['1', 'source-over']]);
+  ctx.LMState.docData.combos = [{ when: {}, layers: [1, 2, 3] }];
+  await ctx.LMPanelPreview.request(false);
+  await settle();
+  assert.equal(host.calls.length, 0, 'every prepared layer is there');
+});
+
+test('a file changed while closed shows the old pictures at once, then extracts the shown layers again', async () => {
+  const files = {};
+  await preparedPanel(files, clean(1, 'S'));
+  const { ctx, host } = await reopened(files, clean(1, 'S2'));
+  assert.deepEqual(host.units.map(b => b.map(u => Array.from(u))), [[[1]]], 'only the layer on screen, not everything');
+  assert.deepEqual(lastDraw(ctx).map(e => e[0]), ['1']);
+});
+
+test('closing without saving an edit does not trust the saved pictures on the next open', async () => {
+  const files = {};
+  const first = await preparedPanel(files, clean(1, 'S'));
+  first.host.mark = unsaved(2, 'S');
+  await first.ctx.LMPanelPreview.request(false);
+  await settle();
+  const { host } = await reopened(files, clean(1, 'S'));
+  assert.equal(host.units.length, 1);
+});
+
+test('saving a check-only change keeps the pictures valid for the next open', async () => {
+  const files = {};
+  const first = await preparedPanel(files, clean(1, 'S'));
+  first.host.mark = clean(1, 'S2'); // 같은 히스토리, 저장해서 파일만 달라졌다
+  await first.ctx.LMPanelPreview.onSaved();
+  const { host } = await reopened(files, clean(1, 'S2'));
+  assert.equal(host.calls.length, 0);
+});
+
+test('saving after an edit keeps every picture but the edited layer', async () => {
+  const files = {};
+  const first = await preparedPanel(files, clean(1, 'S'));
+  first.ctx.LMState.selectedIds = [1];
+  await first.ctx.LMPanelPreview.request(false);
+  await settle();
+  first.ctx.LMState.selectedIds = [2];
+  first.host.mark = clean(2, 'S2');
+  await first.ctx.LMPanelPreview.onSaved();
+  await settle();
+  const { ctx, host } = await reopened(files, clean(1, 'S2'));
+  assert.equal(host.calls.length, 0, 'layer 1 on screen was not the edited one');
+  ctx.LMState.docData.combos = [{ when: {}, layers: [1, 2, 3] }];
+  await ctx.LMPanelPreview.request(false);
+  await settle();
+  const again = host.units.flat().map(u => Array.from(u)[0]).sort();
+  assert.ok(again.includes(2), `edited layer extracted again, got ${again}`);
+  assert.ok(!again.includes(3), `untouched layer kept, got ${again}`);
+});
+
+test('reopening the panel over the same unsaved state keeps the pictures', async () => {
+  const files = {};
+  const first = await preparedPanel(files, clean(1, 'S'));
+  first.host.mark = unsaved(2, 'S');
+  await first.ctx.LMPanelPreview.request(false);
+  await settle();
+  const { host } = await reopened(files, unsaved(2, 'S'));
+  assert.equal(host.calls.length, 0);
+});
+
+test('files the index no longer uses are deleted, and a saved picture whose file is gone is extracted again', async () => {
+  const files = {};
+  const { host } = await preparedPanel(files, clean(1, 'S'));
+  const dir = host.folders[0];
+  files[dir + '/preview_layer_old.png'] = '';
+  delete files[dir + '/u1.png'];
+  const second = await reopened(files, clean(1, 'S'));
+  await settle();
+  assert.ok(!(dir + '/preview_layer_old.png' in files), 'unused file swept');
+  assert.ok(dir + '/index.json' in files, 'index kept');
+  assert.ok(dir + '/u2.png' in files, 'used picture kept');
+  assert.deepEqual(second.host.units.map(b => b.map(u => Array.from(u))), [[[1]]]);
+});
+
+test('pictures of another quality are not reused, and a broken index counts as no index', async () => {
+  const files = {};
+  const { host } = await preparedPanel(files, clean(1, 'S'));
+  const dir = host.folders[0];
+  const { ctx } = loadPanel({ files });
+  fastDoc(ctx, [1]);
+  ctx.LMPanelPreview.setPercent(30);
+  const h2 = fastHost(ctx);
+  h2.mark = clean(1, 'S');
+  await ctx.LMPanelPreview.request(false);
+  await settle();
+  assert.equal(h2.units.length, 1);
+  files[dir + '/index.json'] = '{ not json';
+  const third = await reopened(files, clean(1, 'S'));
+  assert.equal(third.host.units.length, 1);
+});
+
+test('a document that was never saved extracts to the temp folder and writes no index', async () => {
+  const files = {};
+  const { ctx } = loadPanel({ files });
+  fastDoc(ctx, [1]);
+  ctx.LMState.docInfo = { name: 'new', path: null, width: 10000, height: 8000 };
+  ctx.LMState.docKey = 'new';
+  const host = fastHost(ctx);
+  host.mark = unsaved(1, null);
+  await ctx.LMPanelPreview.prepareAll();
+  await settle();
+  assert.ok(host.calls.length > 0);
+  assert.deepEqual(host.folders.filter(Boolean), []);
+  assert.deepEqual(Object.keys(files).filter(f => f.endsWith('index.json')), []);
+});
+
+test('a document that closed is forgotten, so opening it again goes back to the saved pictures', async () => {
+  const files = {};
+  const first = await preparedPanel(files, clean(1, 'S'));
+  first.ctx.LMPanelPreview.prune([]);
+  first.host.mark = clean(1, 'S2');
+  const before = first.host.units.length;
+  await first.ctx.LMPanelPreview.request(false);
+  await settle();
+  assert.equal(first.host.units.length, before + 1, 'file changed, shown layer extracted again');
 });
 
 test('the layer tab offers the fast switch only while the panel preview is on', () => {

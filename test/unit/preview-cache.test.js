@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createCache, createScheduler, clampSplit, clampPercent, previewSize } = require('../../core/preview-cache');
+const { createCache, createScheduler, clampSplit, clampPercent, previewSize, cacheIsFresh, cacheFolderName } = require('../../core/preview-cache');
 
 test('cache evicts the least recently used entry beyond the limit', () => {
   const c = createCache(2);
@@ -72,4 +72,26 @@ test('previewSize scales the long side by percent, stays within 8192px, and neve
   ]) {
     assert.deepEqual(previewSize(percent, w, h), want, `${percent}% of ${w}x${h}`);
   }
+});
+
+test('cacheIsFresh trusts saved pictures only when the document cannot have changed since', () => {
+  const mark = (id, name, saved, stamp) => ({ id, index: id, count: id, name, saved, stamp });
+  const index = (m, dirty) => ({ mark: m, dirty });
+  const cases = [
+    ['reopened, unchanged file', index(mark(9, 'Brush', true, 'S'), false), mark(1, 'Open', true, 'S'), true],
+    ['reopened, file changed while closed', index(mark(9, 'Brush', true, 'S'), false), mark(1, 'Open', true, 'S2'), false],
+    ['closed without saving an edit', index(mark(9, 'Brush', false, 'S'), true), mark(1, 'Open', true, 'S'), false],
+    ['edited, saved without the panel noticing', index(mark(9, 'Brush', false, 'S'), true), mark(1, 'Open', true, 'S2'), false],
+    ['panel reopened, same history state, unsaved', index(mark(9, 'Brush', false, 'S'), true), mark(9, 'Brush', false, 'S'), true],
+    ['panel reopened, edited in between', index(mark(9, 'Brush', false, 'S'), true), mark(10, 'Brush', false, 'S'), false],
+    ['same state number after a restart, other state', index(mark(1, 'Brush', false, 'S'), true), mark(1, 'Open', true, 'S'), false],
+    ['never saved to a file', index(mark(9, 'Brush', true, null), false), mark(1, 'Open', true, null), false],
+  ];
+  for (const [name, idx, now, want] of cases) assert.equal(cacheIsFresh(idx, now), want, name);
+});
+
+test('cacheFolderName is one folder per file, whatever the case or slash style', () => {
+  assert.equal(cacheFolderName('C:\\Art\\A.psb'), cacheFolderName('c:/art/a.psb'));
+  assert.notEqual(cacheFolderName('c:/art/a.psb'), cacheFolderName('c:/art/b.psb'));
+  assert.match(cacheFolderName('c:/art/한글 파일.psb'), /^[0-9a-z]+$/);
 });

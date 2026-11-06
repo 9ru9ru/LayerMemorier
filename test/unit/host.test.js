@@ -74,6 +74,27 @@ test('renderLayerPictures hides everything once, shows each unit alone, saves it
   assert.deepEqual(historyNow(ps), ps.before, 'history list and current state untouched');
 });
 
+test('renderLayerPictures saves into the folder the panel names, creating it, and leaves the temp folder alone', () => {
+  const { LM, ps } = loadHost();
+  const r = call(LM, 'renderLayerPictures', layerArgs(ps, { folder: 'C:/data/LayerMemorier/preview-cache/abc' }));
+  assert.ok(!r.error, r.error);
+  for (const d of r.done) assert.match(d.path, /^C:\/data\/LayerMemorier\/preview-cache\/abc\/preview_layer_/);
+  assert.ok(ps.folders.has('C:/data/LayerMemorier/preview-cache/abc'));
+});
+
+test('getHistoryMark has no file stamp for a document that was never saved', () => {
+  const { LM, ps } = loadHost({ saved: false });
+  delete ps.doc.fullName;
+  const m = JSON.parse(LM.getHistoryMark());
+  assert.equal(m.stamp, null);
+  assert.equal(m.saved, false);
+});
+
+test('eventIds includes the save event, so the panel can note a saved document', () => {
+  const { LM } = loadHost();
+  assert.equal(JSON.parse(LM.eventIds()).save, 'save');
+});
+
 test('renderLayerPictures stops at the time budget but always finishes one unit', () => {
   const { LM, ps } = loadHost();
   const r = call(LM, 'renderLayerPictures', layerArgs(ps, { budgetMs: 0 }));
@@ -106,9 +127,9 @@ test('renderLayerPictures restores history when saving a unit fails', () => {
 
 test('getHistoryMark names the current state, with no id when Photoshop has none', () => {
   const { LM } = loadHost({ history: { states: ['Open', 'Brush'], index: 1 } });
-  assert.deepEqual(JSON.parse(LM.getHistoryMark()), { id: 1001, index: 2, count: 2, name: 'Brush' });
+  assert.deepEqual(JSON.parse(LM.getHistoryMark()), { id: 1001, index: 2, count: 2, name: 'Brush', saved: true, stamp: '5000:777' });
   const none = loadHost({ history: { states: ['Open', 'Brush'], index: 1, noId: true } });
-  assert.deepEqual(JSON.parse(none.LM.getHistoryMark()), { id: null, index: 2, count: 2, name: 'Brush' });
+  assert.deepEqual(JSON.parse(none.LM.getHistoryMark()), { id: null, index: 2, count: 2, name: 'Brush', saved: true, stamp: '5000:777' });
 });
 
 test('renderPreview refuses when redo states exist and touches nothing', () => {

@@ -19,6 +19,11 @@
       // 문서 전환·닫기·새 문서는 패널이 일으킬 수 없으므로 메아리로 보고 건너뛰지 않는다.
       // 스크립트로 새 문서를 만들면 documentAfterActivate 없이 make(new: document)만 온다.
       const { id, data } = LMHost.eventInfo(ev);
+      // 저장하면 보관한 레이어 그림이 새 파일과 맞는다고 적어 둔다. 저장이 끝난 뒤에 읽도록 조금 기다린다.
+      if (id === ids.save) {
+        setTimeout(() => LMPanelPreview.onSaved().catch(err => LMApp.status(err.message)), 300);
+        return;
+      }
       const newDoc = id === ids.make && data.new && data.new._obj === 'document';
       // setd 는 레이어 색이 바뀐 경우만 본다 (그 밖의 속성 변경은 무시). 패널은 색을 바꾸지 않으므로 메아리가 아니다.
       const colorChange = id === ids.set && data.to && data.to._obj === 'layer' && data.to.color;

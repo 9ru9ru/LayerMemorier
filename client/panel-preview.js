@@ -4,16 +4,18 @@ const LMPanelPreview = (() => {
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const KEY_ON = 'lm.panelPreview';
   const KEY_SPLIT = 'lm.previewSplit';
-  const KEY_PERCENT = 'lm.previewPercent';
+  const KEY_PERCENT = 'lm.previewFixedPercent';
   // 원본 대비 %. 낮을수록 줄이기·저장이 빨라진다. 합치기는 항상 원본 크기라 그 시간은 그대로다 (host.jsx renderPreview).
-  const DEFAULT_PERCENT = 10;
+  const DEFAULT_PERCENT = 15;
   // 빠른 그리기: 레이어별 축소 그림을 패널에서 합친다. 내보낼 그림과 조금 다를 수 있다.
   const KEY_FAST = 'lm.previewFast';
   const BATCH_MS = 800;  // 호스트가 한 번에 쓰는 시간. 사이사이 포토샵이 입력을 받는다.
   const PAUSE_MS = 60;
   const HOVER_MS = 1500;
-  const PREP_PAUSE_MS = 150; // 전체 준비: 호출 사이에 쉬는 시간
-  const PREP_SLICE = 200;    // 전체 준비: 한 번에 넘기는 그림 수 (호스트는 BATCH_MS가 지나면 먼저 멈춘다)
+  const PREP_PAUSE_MS = 150; // 레이어 준비: 호출 사이에 쉬는 시간
+  const PREP_SLICE = 200;    // 레이어 준비: 한 번에 넘기는 그림 수 (호스트는 BATCH_MS가 지나면 먼저 멈춘다)
+  const PERSIST_MS = 3000;   // 뽑는 중에 디스크의 목록을 고치는 간격
+  const SWEEP_SLICE = 100;   // 안 쓰는 파일을 한 번에 지우는 수 (패널이 멈추지 않게 나눈다)
   const MESSAGES = {
     LM_REDO_PENDING: '다시 실행할 단계가 있어 미리보기를 미룹니다 (작업을 하나 하거나 다시 그리기)',
   };
@@ -25,16 +27,12 @@ const LMPanelPreview = (() => {
   let signature = null;
   let wanted = null;   // 지금 보여야 할 그림의 캐시 키. 늦게 끝난 이전 그리기가 덮어쓰지 않게 한다.
   const state = { path: '', label: '', busy: false, error: '', ms: null, progress: '' };
-  // 그림 파일 경로만 기억하고, 메모리에는 합칠 때 필요한 그림만 올린다 (전체 준비로 수천 장이 될 수 있다).
-  const pictures = LMCore.previewCache.createCache(50000); // 그림 키 → 파일 경로
-  const latest = LMCore.previewCache.createCache(50000);   // 레이어 묶음 → 마지막 파일. 새 그림이 올 때까지 대신 보여 준다.
-  const images = LMCore.previewCache.createCache(300);     // 파일 경로 → {ready}
-  let prep = null;       // 진행 중인 전체 준비 {units, docKey, startedAt, extracted, left}
+  // 문서마다 따로 둔다 (레이어 id가 문서마다 겹친다). 문서 탭을 오가도 그림이 남는다. session() 참고.
+  const sessions = new Map();
+  // 그림 파일 경로만 기억하고, 메모리에는 합칠 때 필요한 그림만 올린다 (레이어 준비로 수천 장이 될 수 있다).
+  const images = LMCore.previewCache.createCache(300); // 파일 경로 → {ready}
+  let prep = null;       // 진행 중인 레이어 준비 {units, docKey, startedAt, extracted, left}
   let hostCalls = 0;     // 진행 중인 레이어 그림 호출 수 (LMState.previewing)
-  let generations = {};  // 레이어 id → 바뀐 횟수. 키에 들어가므로 올리면 그 레이어가 든 그림을 다시 뽑는다.
-  let generationAll = 0;
-  let mark = null;       // 마지막으로 본 히스토리 상태
-  let lastSelected = [];
   let canvas = null;
   let hoverAt = 0;
 
@@ -123,12 +121,127 @@ const LMPanelPreview = (() => {
 
   // ---- 빠른 그리기 ----
 
-  function pictureKey(maxSize, ids) {
-    return maxSize + '|' + generationAll + '|' + ids.map(id => id + '.' + (generations[id] || 0)).join('+');
+  function cacheDir(path) {
+    return `${LMHost.cs.getSystemPath(SystemPath.USER_DATA)}/LayerMemorier/preview-cache/${LMCore.previewCache.cacheFolderName(path)}`;
   }
 
-  function missing(t) {
-    return t.units.filter(u => !pictures.get(pictureKey(t.maxSize, u.ids)));
+  // 지금 문서의 빠른 그리기 상태.
+  // pictures: 그림 키 → {ids, maxSize, path}. latest: 레이어 묶음 → 마지막 파일 (새 그림이 올 때까지 대신 보여 준다).
+  // generations: 레이어 id → 바뀐 횟수. 키에 들어가므로 올리면 그 레이어가 든 그림을 다시 뽑는다.
+  // mark: 마지막으로 본 히스토리 상태. dirty: 파일에 저장되지 않은 수정이 있다. dir: 보관 폴더 (파일이 없는 문서는 null).
+  function session() {
+    let s = sessions.get(LMState.docKey);
+    if (!s) {
+      const path = LMState.docInfo && LMState.docInfo.path ? LMState.docInfo.path : null;
+      s = {
+        pictures: new Map(), latest: new Map(), generations: {}, generationAll: 0,
+        mark: null, lastSelected: [], dirty: false, loading: null, persistedAt: 0, path, dir: path ? cacheDir(path) : null,
+      };
+      sessions.set(LMState.docKey, s);
+    }
+    return s;
+  }
+
+  function pictureKey(s, maxSize, ids) {
+    return maxSize + '|' + s.generationAll + '|' + ids.map(id => id + '.' + (s.generations[id] || 0)).join('+');
+  }
+
+  function bump(s, ids) {
+    for (const id of ids) s.generations[id] = (s.generations[id] || 0) + 1;
+  }
+
+  function missing(s, t) {
+    return t.units.filter(u => !s.pictures.get(pictureKey(s, t.maxSize, u.ids)));
+  }
+
+  // ---- 디스크 보관: <dir>/index.json 과 그림 파일 ----
+
+  // 지금 유효한 그림은 entries, 수정으로 낡았지만 대신 보여 줄 수 있는 그림은 stale.
+  function persist(s, force) {
+    if (!s.dir || !s.mark) return;
+    const now = Date.now();
+    if (!force && now - s.persistedAt < PERSIST_MS) return;
+    s.persistedAt = now;
+    const entries = {};
+    const used = new Set();
+    for (const [key, p] of s.pictures) {
+      if (key === pictureKey(s, p.maxSize, p.ids)) {
+        entries[`${p.maxSize}|${p.ids.join('+')}`] = p.path;
+        used.add(p.path);
+      }
+    }
+    const stale = {};
+    for (const [ids, path] of s.latest) if (!used.has(path)) stale[ids] = path;
+    const fs = window.cep.fs;
+    fs.makedir(s.dir);
+    fs.writeFile(`${s.dir}/index.json`, JSON.stringify({ version: 1, path: s.path, mark: s.mark, dirty: s.dirty, entries, stale }), cep.encoding.UTF8);
+  }
+
+  async function sweep(dir, names) {
+    const fs = window.cep.fs;
+    for (let i = 0; i < names.length; i += SWEEP_SLICE) {
+      for (const name of names.slice(i, i + SWEEP_SLICE)) fs.deleteFile(`${dir}/${name}`);
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+  }
+
+  function readIndex(s) {
+    const fs = window.cep.fs;
+    const r = fs.readFile(`${s.dir}/index.json`, cep.encoding.UTF8);
+    if (r.err !== fs.NO_ERROR) return null;
+    try {
+      const index = JSON.parse(r.data);
+      return index && index.version === 1 && index.path === s.path ? index : null;
+    } catch (e) {
+      return null; // 깨진 목록은 없는 것으로 친다.
+    }
+  }
+
+  // 보관한 그림을 읽는다. 믿을 수 있으면 그대로 쓰고, 아니면 다시 뽑을 때까지 대신 보여 주기만 한다.
+  // 다른 화질의 그림과 목록에 없는 파일은 지운다.
+  function restore(s, now) {
+    s.dirty = !now.saved;
+    if (!s.dir) return;
+    const fs = window.cep.fs;
+    const listed = fs.readdir(s.dir);
+    const names = listed.err === fs.NO_ERROR ? listed.data : [];
+    const onDisk = new Set(names);
+    const baseName = p => String(p).split('/').pop();
+    const keep = new Set(['index.json']);
+    const index = readIndex(s);
+    if (index) {
+      const fresh = LMCore.previewCache.cacheIsFresh(index, now);
+      if (fresh) s.dirty = !!index.dirty;
+      const maxSize = sizeAt(percent()).maxSize;
+      for (const [key, path] of Object.entries(index.entries || {})) {
+        const bar = key.indexOf('|');
+        if (Number(key.slice(0, bar)) !== maxSize || !onDisk.has(baseName(path))) continue;
+        const ids = key.slice(bar + 1).split('+').map(Number);
+        keep.add(baseName(path));
+        s.latest.set(ids.join('+'), path);
+        if (fresh) s.pictures.set(pictureKey(s, maxSize, ids), { ids, maxSize, path });
+      }
+      for (const [ids, path] of Object.entries(index.stale || {})) {
+        if (!onDisk.has(baseName(path)) || s.latest.has(ids)) continue;
+        keep.add(baseName(path));
+        s.latest.set(ids, path);
+      }
+    }
+    sweep(s.dir, names.filter(n => !keep.has(n)));
+  }
+
+  // 문서마다 한 번. 히스토리 상태를 처음 읽어 기준으로 삼고 보관한 그림을 읽는다.
+  function ensureLoaded(s) {
+    if (!s.loading) {
+      s.loading = (async () => {
+        let now = null;
+        try { now = await LMHost.call('getHistoryMark'); } catch (e) { return; }
+        s.mark = now;
+        s.lastSelected = LMState.selectedIds.slice();
+        if (now) restore(s, now);
+      })();
+    }
+    return s.loading;
   }
 
   function loadPicture(path) {
@@ -151,14 +264,14 @@ const LMPanelPreview = (() => {
   }
 
   // 가시성 적용·복제본이 일으키는 이벤트는 패널 자신의 메아리다 (draw와 같은 이유).
-  async function callPictures(maxSize, units) {
+  async function callPictures(s, maxSize, units) {
     const doc = { name: LMState.docInfo.name, path: LMState.docInfo.path || null };
     hostCalls++;
     LMState.previewing = true;
     LMApp.muteEcho();
     try {
       return await LMHost.call('renderLayerPictures', {
-        doc, all: LMState.layers.map(l => l.id), maxSize, budgetMs: BATCH_MS,
+        doc, all: LMState.layers.map(l => l.id), maxSize, budgetMs: BATCH_MS, folder: s.dir,
         units: Array.from(units, ([key, ids]) => ({ key, on: LMCore.layerComposite.unitOnIds(ids, LMState.layers) })),
       });
     } finally {
@@ -169,13 +282,16 @@ const LMPanelPreview = (() => {
     }
   }
 
-  function keepPictures(units, r) {
+  function keepPictures(s, maxSize, units, r) {
     for (const d of r.done) {
-      pictures.set(d.key, d.path);
-      if (units.has(d.key)) latest.set(units.get(d.key).join('+'), d.path);
+      const ids = units.get(d.key);
+      if (!ids) continue;
+      s.pictures.set(d.key, { ids, maxSize, path: d.path });
+      s.latest.set(ids.join('+'), d.path);
     }
     // 뽑는 동안 생긴 히스토리 번호 변화는 작업자의 수정이 아니다.
-    if (sameMark(mark, r.before)) mark = r.after;
+    if (sameMark(s.mark, r.before)) s.mark = r.after;
+    persist(s, false);
   }
 
   function newCanvas(size) {
@@ -191,8 +307,11 @@ const LMPanelPreview = (() => {
   }
 
   // 지금 있는 그림으로 바로 합친다. 없는 그림은 건너뛰고, 이전 그림이 있으면 그것을 쓴다.
-  async function compose(t) {
-    const paths = t.units.map(u => pictures.get(pictureKey(t.maxSize, u.ids)) || latest.get(u.ids.join('+')));
+  async function compose(s, t) {
+    const paths = t.units.map(u => {
+      const p = s.pictures.get(pictureKey(s, t.maxSize, u.ids));
+      return p ? p.path : s.latest.get(u.ids.join('+'));
+    });
     const imgs = await Promise.all(paths.map(p => (p ? imageAt(p).ready : null)));
     if (t.key !== wanted || !isFast()) return;
     if (!canvas) canvas = newCanvas(t.size);
@@ -215,62 +334,79 @@ const LMPanelPreview = (() => {
   // 앞으로 나아갔으면 그동안 선택돼 있던 레이어, 뒤로 갔으면 어느 레이어인지 모르므로 전부.
   async function checkChanges(fromRefresh) {
     if (LMState.previewing || LMState.exporting) return false;
+    const s = session();
+    await ensureLoaded(s);
     let now = null;
     try { now = await LMHost.call('getHistoryMark'); } catch (e) { return false; }
-    const before = mark;
-    const selectedBefore = lastSelected;
-    mark = now;
-    lastSelected = LMState.selectedIds.slice();
-    if (!before || !now || sameMark(before, now)) return false;
-    if (now.index < before.index) generationAll++;
-    else for (const id of new Set(selectedBefore.concat(lastSelected))) generations[id] = (generations[id] || 0) + 1;
+    const before = s.mark;
+    const selectedBefore = s.lastSelected;
+    s.mark = now;
+    s.lastSelected = LMState.selectedIds.slice();
+    if (!before || !now) return false;
+    const changed = !sameMark(before, now);
+    const wasDirty = s.dirty;
+    // 저장돼 있으면 깨끗하다. 파일만 달라졌으면(히스토리는 그대로) 그사이 저장한 것이다.
+    if (now.saved) s.dirty = false;
+    else if (changed) s.dirty = true;
+    else if (before.stamp !== now.stamp) s.dirty = false;
+    if (!changed) {
+      if (wasDirty !== s.dirty || before.stamp !== now.stamp) persist(s, true);
+      return false;
+    }
+    if (now.index < before.index) s.generationAll++;
+    else bump(s, new Set(selectedBefore.concat(s.lastSelected)));
+    persist(s, true);
     // 블렌드 모드가 바뀌어도 패널에 이벤트가 오지 않으므로 레이어 정보도 다시 읽는다.
     if (!fromRefresh) await LMApp.refresh();
     return true;
   }
 
   async function requestFast(t, force) {
+    const s = session();
     state.label = t.label;
     state.error = '';
     state.path = '';
     state.ms = null;
-    if (force) for (const u of t.units) for (const id of u.ids) generations[id] = (generations[id] || 0) + 1;
+    await ensureLoaded(s);
+    if (force) for (const u of t.units) bump(s, u.ids);
     paint();
-    await compose(t);
+    await compose(s, t);
     if (!force && await checkChanges(false)) return request(false);
-    return missing(t).length ? scheduler.request(t) : undefined;
+    return missing(s, t).length ? scheduler.request(t) : undefined;
   }
 
   // 없는 그림을 나눠서 뽑는다. 사이사이 포토샵이 입력을 받고, 다른 조합으로 넘어가면 멈춘다.
   async function drawFast(t) {
+    const s = sessions.get(t.docKey);
     let ms = 0;
-    while (t.key === wanted && t.docKey === LMState.docKey && !LMState.exporting && isOn() && isFast()) {
-      const todo = missing(t);
+    while (s && t.key === wanted && t.docKey === LMState.docKey && !LMState.exporting && isOn() && isFast()) {
+      const todo = missing(s, t);
       if (!todo.length) break;
       state.progress = `${t.units.length - todo.length}/${t.units.length}`;
       paint();
-      const units = new Map(todo.map(u => [pictureKey(t.maxSize, u.ids), u.ids]));
+      const units = new Map(todo.map(u => [pictureKey(s, t.maxSize, u.ids), u.ids]));
       let r = null;
       try {
-        r = await callPictures(t.maxSize, units);
+        r = await callPictures(s, t.maxSize, units);
       } catch (e) {
         if (/active document changed/.test(e.message)) LMApp.refresh();
         else if (t.key === wanted) state.error = message(e);
         break;
       }
       if (t.docKey !== LMState.docKey) break;
-      keepPictures(units, r);
+      keepPictures(s, t.maxSize, units, r);
       ms += r.ms;
-      await compose(t);
+      await compose(s, t);
       if (!r.done.length) break;
       await new Promise(resolve => setTimeout(resolve, PAUSE_MS));
     }
     state.progress = '';
     state.ms = ms && t.key === wanted && !state.error ? ms : null;
+    if (s && ms) persist(s, true);
     paint();
   }
 
-  // ---- 전체 준비: 버튼을 누르면 모든 레이어의 그림을 미리 뽑는다 ----
+  // ---- 레이어 준비: 버튼을 누르면 모든 레이어의 그림을 미리 뽑는다 ----
 
   function allUnits() {
     const d = LMState.docData;
@@ -305,7 +441,7 @@ const LMPanelPreview = (() => {
   function cancelPrepare() {
     if (!prep) return;
     prep = null;
-    LMApp.status('전체 준비를 취소했습니다. 뽑아 둔 그림은 그대로 쓰고, 다시 누르면 나머지만 뽑습니다.');
+    LMApp.status('레이어 준비를 취소했습니다. 뽑아 둔 그림은 그대로 쓰고, 다시 누르면 나머지만 뽑습니다.');
     LMApp.render();
   }
 
@@ -314,6 +450,7 @@ const LMPanelPreview = (() => {
     if (prep || !isFast() || !isOn() || !LMState.docInfo || !LMState.docData || LMState.exporting) return;
     const job = { units: allUnits(), docKey: LMState.docKey, startedAt: Date.now(), extracted: 0, left: 0 };
     job.left = job.units.length;
+    const s = session();
     prep = job;
     LMApp.render();
     // 고친 직후에 눌러도 고친 레이어를 다시 뽑는다.
@@ -322,34 +459,35 @@ const LMPanelPreview = (() => {
     while (prep === job) {
       if (LMState.exporting || !isOn() || !isFast()) { stopped = '내보내기나 설정 변경으로 멈췄습니다'; break; }
       const maxSize = sizeAt(percent()).maxSize;
-      const todo = job.units.filter(ids => !pictures.get(pictureKey(maxSize, ids)));
+      const todo = job.units.filter(ids => !s.pictures.get(pictureKey(s, maxSize, ids)));
       job.left = todo.length;
       showPrepProgress(job);
       if (!todo.length) break;
-      const units = new Map(todo.slice(0, PREP_SLICE).map(ids => [pictureKey(maxSize, ids), ids]));
+      const units = new Map(todo.slice(0, PREP_SLICE).map(ids => [pictureKey(s, maxSize, ids), ids]));
       let r = null;
       try {
-        r = await callPictures(maxSize, units);
+        r = await callPictures(s, maxSize, units);
       } catch (e) {
         if (/active document changed/.test(e.message)) LMApp.refresh();
         stopped = message(e);
         break;
       }
       if (job.docKey !== LMState.docKey) break;
-      keepPictures(units, r);
+      keepPictures(s, maxSize, units, r);
       job.extracted += r.done.length;
       if (!r.done.length) { stopped = '그림을 뽑지 못했습니다'; break; }
       if (todo.length > r.done.length) await new Promise(resolve => setTimeout(resolve, PREP_PAUSE_MS));
     }
+    persist(s, true);
     if (prep !== job) return; // 취소했거나 문서가 바뀌었다.
     prep = null;
     if (stopped) {
       // 다시 그리면 같은 이유로 또 실패한다. 상태줄의 이유를 보고 작업자가 다시 누른다.
-      LMApp.status(`전체 준비를 멈췄습니다 (${stopped}). 다시 누르면 나머지만 뽑습니다.`);
+      LMApp.status(`레이어 준비를 멈췄습니다 (${stopped}). 다시 누르면 나머지만 뽑습니다.`);
       LMApp.render();
       return undefined;
     }
-    LMApp.status(job.extracted ? `전체 준비 완료: 그림 ${job.extracted}장을 뽑았습니다.` : '이미 전부 준비돼 있습니다.');
+    LMApp.status(job.extracted ? `레이어 준비 완료: 그림 ${job.extracted}장을 뽑았습니다.` : '이미 전부 준비돼 있습니다.');
     LMApp.render();
     return request(false);
   }
@@ -361,6 +499,21 @@ const LMPanelPreview = (() => {
     if (now - hoverAt < HOVER_MS) return Promise.resolve();
     hoverAt = now;
     return checkChanges(false).then(changed => (changed ? request(false) : undefined));
+  }
+
+  // 저장 이벤트: 보관한 그림이 새 파일과 맞는다고 적어 둔다 (다음에 열 때 그대로 쓰도록).
+  function onSaved() {
+    if (!sessions.has(LMState.docKey)) return Promise.resolve();
+    return checkChanges(true).then(changed => (changed && isFast() && isOn() ? request(false) : undefined));
+  }
+
+  // 닫힌 문서는 잊는다. 다시 열면 디스크에서 읽고, 그사이 파일이 바뀌었는지 확인한다.
+  function prune(openKeys) {
+    for (const [key, s] of sessions) {
+      if (openKeys.indexOf(key) !== -1) continue;
+      persist(s, true);
+      sessions.delete(key);
+    }
   }
 
   async function draw(t) {
@@ -406,14 +559,7 @@ const LMPanelPreview = (() => {
       state.error = '';
       state.ms = null;
       state.progress = '';
-      pictures.clear();
-      latest.clear();
-      generations = {};
-      generationAll = 0;
-      mark = null;
-      lastSelected = [];
       prep = null;
-      images.clear();
     }
     if (!LMState.docData) return Promise.resolve();
     const sig = LMCore.combos.layerSignature(LMState.layers);
@@ -446,8 +592,8 @@ const LMPanelPreview = (() => {
 
   function prepareHtml() {
     if (!isFast()) return '';
-    if (prep) return `<button class="pv-prepare" data-action="pv-prepare-cancel">전체 준비 취소</button><span class="pv-prep-progress hint">${esc(prepText(prep))}</span>`;
-    return `<button class="pv-prepare" data-action="pv-prepare-all" title="모든 레이어의 그림을 미리 뽑아 체크가 바로 반영되게 합니다. 레이어가 많으면 오래 걸리고, 그동안 포토샵이 끊기며 임시 탭이 깜빡입니다. 자리를 비울 때 쓰세요. 화질을 바꾸거나 패널을 다시 열면 다시 해야 하고, 처음 쓰는 클리핑 조합은 그때 한 장 더 뽑습니다.">전체 준비</button>`;
+    if (prep) return `<button class="pv-prepare" data-action="pv-prepare-cancel">레이어 준비 취소</button><span class="pv-prep-progress hint">${esc(prepText(prep))}</span>`;
+    return `<button class="primary pv-prepare" data-action="pv-prepare-all" title="모든 레이어의 그림을 미리 뽑아 체크가 바로 반영되게 합니다. 뽑은 그림은 디스크에 남아 다음에 열 때도 씁니다. 레이어가 많으면 오래 걸리고, 그동안 포토샵이 끊기며 임시 탭이 깜빡입니다. 자리를 비울 때 쓰세요. 화질을 바꾸면 다시 해야 하고, 처음 쓰는 클리핑 조합은 그때 한 장 더 뽑습니다.">레이어 준비</button>`;
   }
 
   function fastHtml() {
@@ -457,17 +603,14 @@ const LMPanelPreview = (() => {
 
   function qualityHtml() {
     const p = percent();
-    return `<span class="preview-toggle pv-quality" title="원본 대비 크기입니다. 낮을수록 줄이고 저장하는 시간이 줄어듭니다 (합치는 시간은 그대로). 긴 변은 8192px까지입니다.">화질` +
-      `<input type="range" class="pv-quality-range" min="1" max="100" step="1" value="${p}">` +
+    return `<span class="preview-toggle pv-quality" title="원본 대비 크기입니다. 낮을수록 줄이고 저장하는 시간이 줄어듭니다 (합치는 시간은 그대로). 긴 변은 8192px까지입니다. 바꾸면 레이어 그림을 그 크기로 다시 뽑습니다.">화질` +
       `<input type="number" class="pv-quality-num" min="1" max="100" step="1" value="${p}">%` +
       `<span class="pv-quality-px hint">${sizeText(p)}</span></span>`;
   }
 
-  // 슬라이더와 숫자 칸을 같은 값으로 맞춘다. skip은 지금 움직이는 칸 (치는 중인 글자를 덮어쓰지 않는다).
+  // 크기 표시를 맞춘다. skip이면 숫자 칸은 그대로 둔다 (치는 중인 글자를 덮어쓰지 않는다).
   function showPercent(box, p, skip) {
-    const range = box.querySelector('.pv-quality-range');
     const num = box.querySelector('.pv-quality-num');
-    if (range !== skip) range.value = p;
     if (num !== skip) num.value = p;
     box.querySelector('.pv-quality-px').textContent = sizeText(p);
   }
@@ -479,5 +622,5 @@ const LMPanelPreview = (() => {
     attachCanvas();
   }
 
-  return { isOn, setOn, ratio, setRatio, isFast, setFast, percent, setPercent, fastHtml, qualityHtml, showPercent, attachCanvas, onHover, isPreparing, prepareAll, cancelPrepare, request, onRefresh, paneHtml, state };
+  return { isOn, setOn, ratio, setRatio, isFast, setFast, percent, setPercent, fastHtml, qualityHtml, showPercent, attachCanvas, onHover, onSaved, prune, isPreparing, prepareAll, cancelPrepare, request, onRefresh, paneHtml, state };
 })();

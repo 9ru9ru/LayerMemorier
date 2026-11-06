@@ -36,6 +36,17 @@ function fakeCanvas(ctx) {
   return canvas;
 }
 
+function fakeFs(files) {
+  return {
+    NO_ERROR: 0,
+    readFile: p => (p in files ? { err: 0, data: files[p] } : { err: 3 }),
+    writeFile: (p, d) => { files[p] = d; return { err: 0 }; },
+    makedir: () => ({ err: 0 }),
+    readdir: p => ({ err: 0, data: Object.keys(files).filter(f => f.startsWith(p + '/')).map(f => f.slice(p.length + 1)) }),
+    deleteFile: p => { delete files[p]; return { err: 0 }; },
+  };
+}
+
 function memoryStorage() {
   const m = new Map();
   return { getItem: k => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k) };
@@ -74,7 +85,9 @@ function loadPanel(opts = {}) {
   ctx.CSInterface = function () { this.getSystemPath = () => '/ext'; this.evalScript = (s, cb) => cb('null'); this.getExtensionID = () => 'x'; };
   ctx.SystemPath = { EXTENSION: 'ext', USER_DATA: 'data' };
   ctx.CSEvent = function () {};
-  ctx.cep = { encoding: { UTF8: 'UTF8' }, fs: { NO_ERROR: 0, readFile: () => ({ err: 3 }), writeFile: () => ({ err: 0 }), makedir: () => ({ err: 0 }) } };
+  // opts.files를 넘기면 패널을 다시 연 것처럼 디스크 내용을 이어 쓴다.
+  ctx.cepFiles = opts.files || {};
+  ctx.cep = { encoding: { UTF8: 'UTF8' }, fs: fakeFs(ctx.cepFiles) };
   for (const src of scriptOrder()) {
     const file = path.resolve(CLIENT, src);
     vm.runInContext(fs.readFileSync(file, 'utf8'), ctx, { filename: file });

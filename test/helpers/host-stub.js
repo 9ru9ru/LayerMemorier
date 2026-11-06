@@ -9,7 +9,7 @@ const HOST = path.join(__dirname, '../../host/host.jsx');
 
 function loadHost(opts = {}) {
   // history.states: 히스토리 패널 항목 이름, history.index: 현재 항목(0부터). 그 뒤 항목은 Redo(흐린) 단계다.
-  const o = Object.assign({ width: 1000, height: 1000, history: null, failSave: false, failDelete: false }, opts);
+  const o = Object.assign({ width: 1000, height: 1000, history: null, failSave: false, failDelete: false, saved: true }, opts);
   const history = o.history || { states: ['Open', 'Brush', 'Brush', 'Move', 'Brush'], index: 4 };
   const ps = { log: [], files: new Set(), folders: new Set(), closedDuplicates: 0, history };
 
@@ -39,7 +39,8 @@ function loadHost(opts = {}) {
 
   // 포토샵처럼: 앞 단계를 고르면 뒤 단계는 Redo로 남고, 새 단계를 만들면 Redo 단계는 지워진다.
   const doc = makeDoc('a.psb', o.width, o.height);
-  doc.fullName = { fsName: 'C:\\art\\a.psb' };
+  doc.saved = o.saved;
+  doc.fullName = { fsName: 'C:\\art\\a.psb', length: 777, modified: { getTime: () => 5000 } };
   Object.defineProperty(doc, 'activeHistoryState', {
     get: () => ({ index: history.index, name: history.states[history.index] }),
     set: v => { ps.log.push(['historyState', v.index]); history.index = v.index; },
@@ -106,7 +107,8 @@ function loadHost(opts = {}) {
   function Folder(p) {
     this.fsName = p;
     Object.defineProperty(this, 'exists', { get: () => ps.folders.has(p) });
-    this.create = () => ps.folders.add(p);
+    this.create = () => { ps.folders.add(p); return true; };
+    Object.defineProperty(this, 'parent', { get: () => (p.lastIndexOf('/') > 0 ? new Folder(p.slice(0, p.lastIndexOf('/'))) : null) });
     this.getFiles = mask => {
       const re = new RegExp('^' + mask.replace(/\./g, '\\.').replace(/\*/g, '.*') + '$');
       return Array.from(ps.files).filter(f => f.startsWith(p + '/') && re.test(f.slice(p.length + 1))).map(f => new File(f));

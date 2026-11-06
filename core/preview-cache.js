@@ -85,5 +85,26 @@
     return { maxSize, width: Math.max(1, Math.round(width * k)), height: Math.max(1, Math.round(height * k)) };
   }
 
-  return { createCache, createScheduler, clampSplit, clampPercent, previewSize };
+  // 디스크에 보관한 그림을 지금 문서에 그대로 믿어도 되는가.
+  // index: 저장해 둔 {mark, dirty}. mark는 히스토리 상태와 {saved, stamp(파일 시각:크기)}, dirty는 저장 안 된 수정이 있었는지.
+  // 패널만 다시 연 경우(히스토리 상태까지 같음)와, 수정 없이 저장돼 있던 파일을 그대로 다시 연 경우만 믿는다.
+  function cacheIsFresh(index, now) {
+    const was = index.mark;
+    if (!was || !now) return false;
+    if (was.id === now.id && was.index === now.index && was.count === now.count && was.name === now.name && was.stamp === now.stamp) return true;
+    return !!now.saved && !index.dirty && now.stamp != null && was.stamp === now.stamp;
+  }
+
+  // 파일 경로마다 폴더 하나. 대소문자·슬래시 모양이 달라도 같은 파일이면 같은 이름 (FNV-1a).
+  function cacheFolderName(path) {
+    const s = String(path).replace(/\\/g, '/').toLowerCase();
+    let h = 0x811c9dc5;
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h.toString(36);
+  }
+
+  return { createCache, createScheduler, clampSplit, clampPercent, previewSize, cacheIsFresh, cacheFolderName };
 });
