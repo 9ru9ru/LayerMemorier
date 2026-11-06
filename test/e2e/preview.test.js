@@ -12,6 +12,7 @@ const { visibleLayerIds } = require('../../core/combos');
 
 const history = () => JSON.parse(psRun('var d = app.activeDocument; JSON.stringify({ n: d.historyStates.length, cur: d.activeHistoryState.name })'));
 const eyes = () => psCall('getLayers').map(l => [l.name, l.visible]);
+const saved = () => psRun('String(app.activeDocument.saved)');
 
 function setup() {
   const { layers, byName } = buildFixture();
@@ -87,6 +88,18 @@ test('renderLayerPictures saves each layer alone and leaves eyes and history unt
   assert.deepEqual(eyes(), eyesBefore);
 });
 
+test('drawing leaves eyes, history and the saved flag of a saved document as they were (#12, #13)', () => {
+  const { docData, args } = setup();
+  const a = args(enumerate(docData.categories)[0]);
+  const all = a.on.concat(a.off);
+  assert.equal(saved(), 'true');
+  const before = { eyes: eyes(), history: history() };
+  psCall('renderPreview', a);
+  psCall('renderLayerPictures', { doc: a.doc, all, maxSize: 64, budgetMs: 60000, units: [{ key: 'k', on: [a.on[0]] }] });
+  assert.deepEqual({ eyes: eyes(), history: history() }, before);
+  assert.equal(saved(), 'true', 'closing must not ask to save because of a preview');
+});
+
 test('renderPreview with every layer off saves an empty picture', () => {
   const { args } = setup();
   const a = args({});
@@ -95,11 +108,11 @@ test('renderPreview with every layer off saves an empty picture', () => {
   assert.equal(pixel(img, 20, 20)[3], 0);
 });
 
-test('renderPreview refuses while the artist has redo steps, and keeps them', () => {
+test('renderPreview draws while the artist has redo steps, and keeps them', () => {
   const { docData, args } = setup();
   psRun('app.activeDocument.artLayers.add(); "added"');
   psRun('var d = app.activeDocument; d.activeHistoryState = d.historyStates[d.historyStates.length - 2]; "back"');
   const before = history();
-  assert.throws(() => psCall('renderPreview', args(enumerate(docData.categories)[0])), /LM_REDO_PENDING/);
+  psCall('renderPreview', args(enumerate(docData.categories)[0]));
   assert.deepEqual(history(), before, 'redo step still there');
 });

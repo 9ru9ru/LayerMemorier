@@ -2,6 +2,21 @@
 const LMPreview = (() => {
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+  // 스냅샷을 디스크에도 둔다. 켠 채로 패널이나 포토샵을 닫아도 다시 열어서 끄면 되돌아온다 (#13).
+  const KEY_PREFIX = 'lm.previewSnapshot:';
+
+  function store(key, p) {
+    try { localStorage.setItem(KEY_PREFIX + key, JSON.stringify({ snapshot: p.snapshot, combo: p.combo })); } catch (e) { /* 세션 동안만 기억 */ }
+  }
+
+  function forget(key) {
+    try { localStorage.removeItem(KEY_PREFIX + key); } catch (e) { /* 저장한 적 없음 */ }
+  }
+
+  function stored(key) {
+    try { return JSON.parse(localStorage.getItem(KEY_PREFIX + key)); } catch (e) { return null; }
+  }
+
   function current() {
     return LMState.docKey != null ? LMState.previews[LMState.docKey] || null : null;
   }
@@ -52,6 +67,7 @@ const LMPreview = (() => {
     for (const id of all) if (!seen.has(id)) p.touched.push(id);
     // 다른 문서에 갔다 오면 조합 선택이 비워진다. 캔버스와 맞게 되돌릴 수 있도록 기억한다 (state.js refresh).
     p.combo = Object.assign({}, LMState.combo);
+    store(LMState.docKey, p);
     await setVisibility(all.filter(id => visible.has(id)), all.filter(id => !visible.has(id)));
     // 보낸 그대로 패널의 눈 상태를 고친다. 레이어 전체를 다시 읽으면(getLayers) 수백 개일 때
     // 클릭마다 1초가 넘게 걸린다.
@@ -72,6 +88,7 @@ const LMPreview = (() => {
     const p = current();
     if (!p) return;
     delete LMState.previews[LMState.docKey];
+    forget(LMState.docKey);
     const existing = new Set((await LMHost.call('getLayers')).map(l => l.id));
     const on = [], off = [];
     for (const id of p.touched) {
@@ -82,9 +99,26 @@ const LMPreview = (() => {
     await reloadLayers();
   }
 
-  // 닫힌 문서의 스냅샷을 버린다.
+  // 닫힌 문서의 스냅샷을 메모리에서 버린다. 미리보기 눈 그대로 저장했을 수 있으므로 파일이 있는 문서는 디스크에 남긴다.
+  // 파일이 없는 문서(키가 이름뿐)는 다시 열 수 없고, 같은 이름의 새 문서와 헷갈린다.
   function prune(openKeys) {
-    for (const key of Object.keys(LMState.previews)) if (openKeys.indexOf(key) === -1) delete LMState.previews[key];
+    for (const key of Object.keys(LMState.previews)) {
+      if (openKeys.indexOf(key) !== -1) continue;
+      delete LMState.previews[key];
+      if (!/[\\/]/.test(key)) forget(key);
+    }
+  }
+
+  // 문서를 처음 볼 때 디스크의 스냅샷을 되살린다. 눈이 스냅샷과 같으면 미리보기를 저장하지 않고 닫은 것이라 되돌릴 것이 없다.
+  function restore(key, layers) {
+    if (LMState.previews[key]) return;
+    const saved = stored(key);
+    if (!saved || !saved.snapshot) return;
+    if (layers.every(l => !(l.id in saved.snapshot) || saved.snapshot[l.id] === l.visible)) {
+      forget(key);
+      return;
+    }
+    LMState.previews[key] = { snapshot: saved.snapshot, touched: Object.keys(saved.snapshot).map(Number), combo: saved.combo || {} };
   }
 
   function toggleHtml() {
@@ -93,5 +127,5 @@ const LMPreview = (() => {
       (on ? `<span class="preview-label hint">${esc(label())}</span>` : '');
   }
 
-  return { isOn, enable, disable, apply, prune, toggleHtml };
+  return { isOn, enable, disable, apply, prune, restore, toggleHtml };
 })();

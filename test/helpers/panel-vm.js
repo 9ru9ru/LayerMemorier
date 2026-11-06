@@ -66,7 +66,7 @@ function loadPanel(opts = {}) {
   ctx.window = ctx;
   ctx.addEventListener = () => {};
   ctx.self = ctx;
-  ctx.localStorage = opts.storage === 'throw' ? throwingStorage() : memoryStorage();
+  ctx.localStorage = opts.storage === 'throw' ? throwingStorage() : opts.storage || memoryStorage();
   // 문서에 건 리스너를 모아 둔다. 테스트가 입력 이벤트를 직접 흘려보낼 수 있게 (fireDoc).
   ctx.docListeners = {};
   ctx.document = {
@@ -101,4 +101,4 @@ function loadPanel(opts = {}) {
   return { ctx: api, el: (w, h) => fakeEl(w, h) };
 }
 
-module.exports = { loadPanel, fakeEl };
+module.exports = { loadPanel, fakeEl, memoryStorage };

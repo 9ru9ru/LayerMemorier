@@ -9,6 +9,13 @@ const { loadHost, HOST } = require('../helpers/host-stub');
 const call = (LM, fn, arg) => JSON.parse(LM[fn](JSON.stringify(arg)));
 const shown = ps => ps.log.filter(e => e[0] === 'Shw ' || e[0] === 'Hd  ');
 const historyNow = ps => ({ states: ps.history.states.slice(), index: ps.history.index });
+// 눈은 복제본에서만 바꾼다. 원본은 눈·히스토리·저장 상태 모두 그대로여야 한다 (#12, #13).
+function assertOriginalUntouched(ps) {
+  assert.deepEqual(historyNow(ps), ps.before, 'history list and current state untouched');
+  assert.equal(ps.doc.saved, true, 'still marked as saved');
+  assert.ok(shown(ps).every(e => e[2] === 'lm_preview_src'), 'eyes change only on the copy');
+  assert.equal(ps.app.activeDocument, ps.doc, 'the document is active again');
+}
 
 test('host.jsx stays ES3 + ASCII', () => {
   const src = fs.readFileSync(HOST, 'utf8');
@@ -25,16 +32,17 @@ test('getDocInfo reports the size in pixels whatever the ruler units are, and le
   assert.equal(ps.app.preferences.rulerUnits, 'PERCENT');
 });
 
-test('renderPreview applies visibility, downsizes to maxSize, saves, then restores history', () => {
+test('renderPreview applies visibility on a copy, downsizes to maxSize, saves, and leaves the document untouched', () => {
   const { LM, ps } = loadHost({ width: 12000, height: 13500 });
   const r = call(LM, 'renderPreview', { doc: ps.docRef, on: [1, 2], off: [3], maxSize: 1024 });
   assert.ok(!r.error, r.error);
   assert.equal(r.height, 1024);
   assert.equal(r.width, Math.round(12000 * 1024 / 13500));
   assert.match(r.path, /LayerMemorier\/preview_\d+\.png$/);
-  assert.deepEqual(historyNow(ps), ps.before, 'history list and current state untouched (no redo step left)');
+  assertOriginalUntouched(ps);
   assert.deepEqual(shown(ps).map(e => e[0]), ['Shw ', 'Hd  ']);
   assert.equal(ps.closedDuplicates, 1);
+  assert.equal(ps.closedCopies, 1);
 });
 
 test('renderPreview keeps a small document at its size', () => {
@@ -61,17 +69,18 @@ const layerArgs = (ps, extra) => Object.assign({
   units: [{ key: 'k1', on: [1] }, { key: 'k2', on: [2, 3] }],
 }, extra);
 
-test('renderLayerPictures hides everything once, shows each unit alone, saves it, and leaves history untouched', () => {
+test('renderLayerPictures hides everything once on one copy, shows each unit alone, saves it, and leaves the document untouched', () => {
   const { LM, ps } = loadHost({ width: 12000, height: 13500 });
   const r = call(LM, 'renderLayerPictures', layerArgs(ps));
   assert.ok(!r.error, r.error);
   assert.deepEqual(r.done.map(d => d.key), ['k1', 'k2']);
   for (const d of r.done) assert.match(d.path, /LayerMemorier\/preview_layer_\d+_\d+\.png$/);
   assert.equal(new Set(r.done.map(d => d.path)).size, 2, 'one file per unit');
-  assert.deepEqual(shown(ps).map(e => e[0]), ['Hd  ', 'Shw ', 'Shw '], 'the hide-all is sent once');
+  assert.deepEqual(shown(ps).map(e => e[0]), ['Hd  ', 'Shw ', 'Hd  ', 'Shw ', 'Hd  '], 'each unit is shown, then hidden again');
   assert.equal(ps.closedDuplicates, 2);
+  assert.equal(ps.closedCopies, 1, 'one copy per call');
   assert.equal(ps.log.filter(e => e[0] === 'resize').length, 2);
-  assert.deepEqual(historyNow(ps), ps.before, 'history list and current state untouched');
+  assertOriginalUntouched(ps);
 });
 
 test('renderLayerPictures saves into the folder the panel names, creating it, and leaves the temp folder alone', () => {
@@ -99,15 +108,14 @@ test('renderLayerPictures stops at the time budget but always finishes one unit'
   const { LM, ps } = loadHost();
   const r = call(LM, 'renderLayerPictures', layerArgs(ps, { budgetMs: 0 }));
   assert.deepEqual(r.done.map(d => d.key), ['k1']);
-  assert.deepEqual(historyNow(ps), ps.before);
+  assertOriginalUntouched(ps);
 });
 
-test('renderLayerPictures refuses when redo states exist and touches nothing', () => {
+test('renderLayerPictures draws while redo states exist, and keeps them', () => {
   const { LM, ps } = loadHost({ history: { states: ['Open', 'Brush', 'Brush'], index: 1 } });
   const r = call(LM, 'renderLayerPictures', layerArgs(ps));
-  assert.match(r.error, /LM_REDO_PENDING/);
-  assert.equal(ps.closedDuplicates, 0);
-  assert.deepEqual(shown(ps), []);
+  assert.ok(!r.error, r.error);
+  assertOriginalUntouched(ps);
 });
 
 test('renderLayerPictures refuses when another document is active, instead of switching back to it', () => {
@@ -117,12 +125,21 @@ test('renderLayerPictures refuses when another document is active, instead of sw
   assert.deepEqual(shown(ps), []);
 });
 
-test('renderLayerPictures restores history when saving a unit fails', () => {
+test('renderLayerPictures closes its copies and leaves the document untouched when saving a unit fails', () => {
   const { LM, ps } = loadHost({ failSave: true });
   const r = call(LM, 'renderLayerPictures', layerArgs(ps));
   assert.match(r.error, /save failed/);
-  assert.deepEqual(historyNow(ps), ps.before);
+  assertOriginalUntouched(ps);
   assert.equal(ps.closedDuplicates, 1);
+  assert.equal(ps.closedCopies, 1);
+});
+
+test('getFileStamp reads the stamp by path, in the same form as getHistoryMark, and null without a file', () => {
+  const { LM, ps } = loadHost();
+  ps.files.add('C:/art/a.psb');
+  ps.stamps['C:/art/a.psb'] = [5000, 777];
+  assert.deepEqual(call(LM, 'getFileStamp', { path: 'C:/art/a.psb' }), { stamp: JSON.parse(LM.getHistoryMark()).stamp });
+  assert.deepEqual(call(LM, 'getFileStamp', { path: 'C:/art/gone.psb' }), { stamp: null });
 });
 
 test('getHistoryMark names the current state, with no id when Photoshop has none', () => {
@@ -132,20 +149,21 @@ test('getHistoryMark names the current state, with no id when Photoshop has none
   assert.deepEqual(JSON.parse(none.LM.getHistoryMark()), { id: null, index: 2, count: 2, name: 'Brush', saved: true, stamp: '5000:777' });
 });
 
-test('renderPreview refuses when redo states exist and touches nothing', () => {
+test('renderPreview draws while redo states exist, and keeps them', () => {
   const { LM, ps } = loadHost({ width: 100, height: 100, history: { states: ['Open', 'Brush', 'Brush', 'Move', 'Brush'], index: 2 } });
   const r = call(LM, 'renderPreview', { doc: ps.docRef, on: [1], off: [2], maxSize: 1024 });
-  assert.match(r.error, /LM_REDO_PENDING/);
-  assert.equal(shown(ps).length, 0);
+  assert.ok(!r.error, r.error);
+  assertOriginalUntouched(ps);
   assert.ok(!ps.log.some(e => e[0] === 'historyState'));
 });
 
-test('renderPreview restores history even when saving fails', () => {
+test('renderPreview closes its copies and leaves the document untouched when saving fails', () => {
   const { LM, ps } = loadHost({ width: 100, height: 100, failSave: true });
   const r = call(LM, 'renderPreview', { doc: ps.docRef, on: [1], off: [2], maxSize: 1024 });
   assert.ok(r.error);
-  assert.deepEqual(historyNow(ps), ps.before);
+  assertOriginalUntouched(ps);
   assert.equal(ps.closedDuplicates, 1);
+  assert.equal(ps.closedCopies, 1);
 });
 
 test('renderPreview clears old preview files once, on the first call', () => {
@@ -160,27 +178,11 @@ test('renderPreview clears old preview files once, on the first call', () => {
   assert.ok(ps.files.has(r1.path), 'second call must not delete the first preview');
 });
 
-test('renderPreview can run many times in a row (its own step never counts as redo)', () => {
+test('renderPreview can run many times in a row', () => {
   const { LM, ps } = loadHost({ width: 100, height: 100 });
   for (let i = 0; i < 3; i++) {
     const r = call(LM, 'renderPreview', { doc: ps.docRef, on: [1], off: [2], maxSize: 1024 });
     assert.ok(!r.error, `call ${i + 1}: ${r.error}`);
   }
-  assert.deepEqual(historyNow(ps), ps.before);
-});
-
-test('renderPreview falls back to stepping back when deleting its step fails, and the next call still works', () => {
-  const { LM, ps } = loadHost({ width: 100, height: 100, failDelete: true });
-  const r1 = call(LM, 'renderPreview', { doc: ps.docRef, on: [1], off: [2], maxSize: 1024 });
-  assert.ok(!r1.error, r1.error);
-  assert.equal(ps.history.index, ps.before.index, 'current state is the one before the preview');
-  const r2 = call(LM, 'renderPreview', { doc: ps.docRef, on: [1], off: [2], maxSize: 1024 });
-  assert.ok(!r2.error, 'a left-over greyed preview step is not a user redo step: ' + r2.error);
-});
-
-test('renderPreview never deletes the artist\'s own step when it made no step itself', () => {
-  const { LM, ps } = loadHost({ width: 100, height: 100 });
-  const r = call(LM, 'renderPreview', { doc: ps.docRef, on: [], off: [], maxSize: 1024 });
-  assert.ok(!r.error, r.error);
-  assert.deepEqual(historyNow(ps), ps.before);
+  assertOriginalUntouched(ps);
 });

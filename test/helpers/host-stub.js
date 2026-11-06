@@ -9,9 +9,9 @@ const HOST = path.join(__dirname, '../../host/host.jsx');
 
 function loadHost(opts = {}) {
   // history.states: 히스토리 패널 항목 이름, history.index: 현재 항목(0부터). 그 뒤 항목은 Redo(흐린) 단계다.
-  const o = Object.assign({ width: 1000, height: 1000, history: null, failSave: false, failDelete: false, saved: true }, opts);
+  const o = Object.assign({ width: 1000, height: 1000, history: null, failSave: false, saved: true }, opts);
   const history = o.history || { states: ['Open', 'Brush', 'Brush', 'Move', 'Brush'], index: 4 };
-  const ps = { log: [], files: new Set(), folders: new Set(), closedDuplicates: 0, history };
+  const ps = { log: [], files: new Set(), folders: new Set(), closedDuplicates: 0, closedCopies: 0, stamps: {}, history };
 
   class Store {
     constructor() { this.data = {}; this.refs = []; }
@@ -50,13 +50,18 @@ function loadHost(opts = {}) {
     history.states = history.states.slice(0, history.index + 1).concat(name);
     history.index = history.states.length - 1;
   };
-  doc.duplicate = (name) => {
-    const dup = makeDoc(name, o.width, o.height);
-    dup.resizeImage = (w, h, res, method) => { dup.width = unit(w.value); dup.height = unit(h.value); ps.log.push(['resize', w.value, h.value, method]); };
-    dup.close = () => { ps.closedDuplicates++; };
-    app.activeDocument = dup;
-    return dup;
-  };
+  // merged면 합친 복제본, 아니면 미리보기가 눈을 바꾸는 전체 복제본.
+  function canDuplicate(d) {
+    d.duplicate = (name, merged) => {
+      const dup = makeDoc(name, o.width, o.height);
+      dup.resizeImage = (w, h, res, method) => { dup.width = unit(w.value); dup.height = unit(h.value); ps.log.push(['resize', w.value, h.value, method]); };
+      dup.close = () => { if (merged) ps.closedDuplicates++; else ps.closedCopies++; };
+      canDuplicate(dup);
+      app.activeDocument = dup;
+      return dup;
+    };
+  }
+  canDuplicate(doc);
 
   const app = {
     documents: [doc],
@@ -69,14 +74,7 @@ function loadHost(opts = {}) {
   };
 
   function executeAction(id, desc) {
-    ps.log.push([id, desc]);
-    if (id === 'Dlt ' && desc.data.null && desc.data.null.refs.some(r => r[0] === 'HstS')) {
-      if (o.failDelete) throw new Error('delete failed (stub)');
-      // 현재 항목과 그 뒤를 지운다 (비선형 히스토리 꺼짐). 앞 항목이 현재가 된다.
-      history.states = history.states.slice(0, history.index);
-      history.index = history.states.length - 1;
-      return;
-    }
+    ps.log.push([id, desc, app.activeDocument.name]);
     if (id === 'Expr') {
       if (o.failSave) throw new Error('save failed (stub)');
       ps.files.add(desc.data.Usng.data['In  '].fsName);
@@ -102,6 +100,8 @@ function loadHost(opts = {}) {
   function File(p) {
     this.fsName = p;
     Object.defineProperty(this, 'exists', { get: () => ps.files.has(p) });
+    Object.defineProperty(this, 'modified', { get: () => ({ getTime: () => ps.stamps[p][0] }) });
+    Object.defineProperty(this, 'length', { get: () => ps.stamps[p][1] });
     this.remove = () => ps.files.delete(p);
   }
   function Folder(p) {

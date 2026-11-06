@@ -10,7 +10,7 @@ const LMState = {
   combo: {},          // 레이어 탭에서 고른 조합 {categoryId: valueId} (세션)
   comboClipboard: null, // 조합 복사 {docKey, label, ids} (세션, 문서가 바뀌면 비움)
   anchorId: null,     // Shift 범위 선택의 시작 행 id
-  previews: {},       // 포토샵 미리보기 {docKey: {snapshot: {layerId: visible}, touched: [layerId], combo: 반영한 조합}} (세션)
+  previews: {},       // 포토샵 미리보기 {docKey: {snapshot: {layerId: visible}, touched: [layerId], combo: 반영한 조합}} (디스크에도 보관, preview.js)
   exportOpen: {},     // 내보내기 탭 <details> 펼침 상태 {include, exclude, warnings} (세션)
   echoUntil: 0,       // 이 시각(ms) 전까지는 포토샵 이벤트를 패널 자신의 메아리로 보고 무시
   renderedTab: null,  // 직전에 그린 탭 (스크롤 복원 판단용)
@@ -112,6 +112,7 @@ const LMApp = {
       // 돌아왔으면 캔버스에 반영된 조합으로 선택을 되돌린다 (위에서 {}로 비웠으므로).
       LMPreview.prune(openKeys);
       LMPanelPreview.prune(openKeys);
+      if (fresh && key) LMPreview.restore(key, layers);
       if (fresh && key && LMState.previews[key]) LMState.combo = Object.assign({}, LMState.previews[key].combo);
       // 조합 선택(미리보기 기억에서 되돌린 것 포함)에 지금 없는 카테고리·값 키가 남지 않게 한다.
       if (docData) LMState.combo = LMCore.combos.cleanWhen(LMState.combo, docData.categories);

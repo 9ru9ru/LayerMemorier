@@ -2,7 +2,7 @@
 // 패널 렌더·동작 스모크 테스트 (test/helpers/panel-vm.js). 호스트 호출은 LMHost.call 을 덮어써서 본다.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { loadPanel } = require('../helpers/panel-vm');
+const { loadPanel, memoryStorage } = require('../helpers/panel-vm');
 
 function setupDoc(ctx, { categories, combos, layers }) {
   ctx.LMState.docInfo = { name: 'a.psd', path: 'C:/a.psd', width: 10000, height: 8000 };
@@ -156,15 +156,6 @@ test('the panel preview does nothing while off or while exporting', async () => 
   ctx.LMState.exporting = true;
   await ctx.LMPanelPreview.request(false);
   assert.equal(n, 0);
-});
-
-test('redo-pending error shows the Korean message', async () => {
-  const { ctx } = loadPanel();
-  setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [], layers: [L(1, null)] });
-  ctx.LMHost.call = async () => { throw new Error('renderPreview: LM_REDO_PENDING'); };
-  ctx.LMPanelPreview.setOn(true);
-  await ctx.LMPanelPreview.request(false);
-  assert.match(ctx.LMPanelPreview.paneHtml(), /다시 실행할 단계가 있어/);
 });
 
 test('a category without values shows a message instead of rendering', async () => {
@@ -367,6 +358,7 @@ function fastHost(ctx, { batch = 100 } = {}) {
   const host = { calls: [], units: [], folders: [], mark: { id: 1, index: 5, count: 5, name: 'Brush' } };
   ctx.LMHost.call = async (fn, arg) => {
     if (fn === 'getHistoryMark') return host.mark;
+    if (fn === 'getFileStamp') return { stamp: host.fileStamp };
     if (fn === 'getLayers') return ctx.LMState.layers;
     if (fn === 'getDocInfo') return ctx.LMState.docInfo;
     if (fn === 'getOpenDocKeys') return [ctx.LMState.docKey];
@@ -380,7 +372,7 @@ function fastHost(ctx, { batch = 100 } = {}) {
     const dir = arg.folder || 'C:/t';
     const done = todo.map(u => ({ key: u.key, path: dir + '/u' + Array.from(u.on).join('_') + '.png' }));
     if (arg.folder) for (const d of done) ctx.cepFiles[d.path] = '';
-    return { done, before: host.mark, after: host.mark, ms: 500 };
+    return { done, ms: 500 };
   };
   return host;
 }
@@ -472,7 +464,7 @@ test('a host that finishes nothing does not make the panel loop forever', async 
   fastDoc(ctx, [1]);
   const host = fastHost(ctx);
   const call = ctx.LMHost.call;
-  ctx.LMHost.call = async (fn, a) => { const r = await call(fn, a); return fn === 'renderLayerPictures' ? { done: [], before: r.before, after: r.after, ms: 1 } : r; };
+  ctx.LMHost.call = async (fn, a) => { const r = await call(fn, a); return fn === 'renderLayerPictures' ? { done: [], ms: 1 } : r; };
   await ctx.LMPanelPreview.request(false);
   await settle();
   assert.equal(host.calls.length, 1);
@@ -527,30 +519,6 @@ test('going back in history extracts every layer again, because any layer may ha
   await ctx.LMPanelPreview.request(false);
   await settle();
   assert.deepEqual(host.units[1].map(u => Array.from(u)), [[1], [2]]);
-});
-
-test('the history step shift caused by extraction itself does not count as an edit', async () => {
-  const { ctx } = loadPanel();
-  fastDoc(ctx, [1]);
-  const host = fastHost(ctx);
-  await ctx.LMPanelPreview.request(false);
-  await settle();
-  const call = ctx.LMHost.call;
-  ctx.LMHost.call = async (fn, a) => {
-    const r = await call(fn, a);
-    if (fn !== 'renderLayerPictures') return r;
-    const after = { id: null, index: 3, count: 3, name: 'Brush' };
-    host.mark = after;
-    return Object.assign(r, { after });
-  };
-  host.mark = { id: null, index: 5, count: 5, name: 'Brush' };
-  ctx.LMState.docData.combos = [{ when: {}, layers: [1, 2] }];
-  await ctx.LMPanelPreview.request(false);
-  await settle();
-  const extractions = host.units.length;
-  await ctx.LMPanelPreview.request(false);
-  await settle();
-  assert.equal(host.units.length, extractions);
 });
 
 test('coming back to the panel picks up an edit once, without asking again on every mouse move', async () => {
@@ -700,7 +668,7 @@ test('a failure stops prepare-all with a message on the status line', async () =
   const seen = [];
   const call = ctx.LMHost.call;
   ctx.LMHost.call = async (fn, a) => {
-    if (fn === 'renderLayerPictures') { seen.push(fn); throw new Error('renderLayerPictures: LM_REDO_PENDING'); }
+    if (fn === 'renderLayerPictures') { seen.push(fn); throw new Error('renderLayerPictures: boom'); }
     return call(fn, a);
   };
   const status = [];
@@ -708,7 +676,7 @@ test('a failure stops prepare-all with a message on the status line', async () =
   await ctx.LMPanelPreview.prepareAll();
   assert.equal(seen.length, 1);
   assert.equal(ctx.LMPanelPreview.isPreparing(), false);
-  assert.ok(status.some(m => /다시 실행할 단계/.test(m)), status.join('|'));
+  assert.ok(status.some(m => /boom/.test(m)), status.join('|'));
   assert.equal(host.units.length, 0);
 });
 
@@ -850,6 +818,87 @@ test('saving after an edit keeps every picture but the edited layer', async () =
   const again = host.units.flat().map(u => Array.from(u)[0]).sort();
   assert.ok(again.includes(2), `edited layer extracted again, got ${again}`);
   assert.ok(!again.includes(3), `untouched layer kept, got ${again}`);
+});
+
+test('a save of another file or a save still in progress does not touch the saved pictures', async () => {
+  const files = {};
+  const first = await preparedPanel(files, clean(1, 'S'));
+  first.host.mark = clean(1, 'S2');
+  await first.ctx.LMPanelPreview.onSaved({ in: { _path: 'C:\\out\\export.png' }, saveStage: { _value: 'saveSucceeded' } });
+  await first.ctx.LMPanelPreview.onSaved({ in: { _path: 'C:\\a.psd' }, saveStage: { _value: 'saveBegin' } });
+  const { host } = await reopened(files, clean(1, 'S2'));
+  assert.equal(host.units.length, 1, 'the index still holds the old file stamp');
+});
+
+test('a finished save of this file names the same path with other slashes and letter case', async () => {
+  const files = {};
+  const first = await preparedPanel(files, clean(1, 'S'));
+  first.host.mark = clean(1, 'S2');
+  await first.ctx.LMPanelPreview.onSaved({ in: { _path: 'C:\\A.psd' }, saveStage: { _value: 'saveSucceeded' } });
+  const { host } = await reopened(files, clean(1, 'S2'));
+  assert.equal(host.calls.length, 0);
+});
+
+test('saving during a prepare is noted too: the panel still reads the file stamp while it is drawing', async () => {
+  const files = {};
+  const first = await preparedPanel(files, clean(1, 'S'));
+  first.host.mark = clean(1, 'S2');
+  first.ctx.LMState.previewing = true;
+  await first.ctx.LMPanelPreview.onSaved({ in: { _path: 'C:\\a.psd' } });
+  first.ctx.LMState.previewing = false;
+  const { host } = await reopened(files, clean(1, 'S2'));
+  assert.equal(host.calls.length, 0);
+});
+
+test('closing while saving keeps every picture but the selected layers for the next open', async () => {
+  const files = {};
+  const first = await preparedPanel(files, clean(1, 'S'));
+  first.ctx.LMState.selectedIds = [2];
+  first.host.fileStamp = 'S2';
+  await first.ctx.LMPanelPreview.onClosed({ saving: { _value: 'yes' } });
+  const { ctx, host } = await reopened(files, clean(1, 'S2'));
+  assert.equal(host.calls.length, 0, 'layer 1 on screen was not selected');
+  ctx.LMState.docData.combos = [{ when: {}, layers: [1, 2, 3] }];
+  await ctx.LMPanelPreview.request(false);
+  await settle();
+  const again = host.units.flat().map(u => Array.from(u)[0]).sort();
+  assert.ok(again.includes(2), `selected layer extracted again, got ${again}`);
+  assert.ok(!again.includes(3), `other layer kept, got ${again}`);
+});
+
+test('saving and closing at once is noted by path, because the document is already gone', async () => {
+  const files = {};
+  const first = await preparedPanel(files, clean(1, 'S'));
+  const saving = first.ctx.LMPanelPreview.onSaved({ in: { _path: 'C:\\a.psd' }, saveStage: { _value: 'saveSucceeded' } });
+  first.ctx.LMState.docKey = null;
+  first.host.fileStamp = 'S2';
+  await saving;
+  const { host } = await reopened(files, clean(1, 'S2'));
+  assert.equal(host.calls.length, 0);
+});
+
+test('closing without saving, or when the file did not change, records nothing', async () => {
+  for (const [event, stamp] of [[{ saving: { _value: 'no' } }, 'S2'], [{ saving: { _value: 'yes' } }, 'S']]) {
+    const files = {};
+    const first = await preparedPanel(files, clean(1, 'S'));
+    first.host.mark = unsaved(2, 'S');
+    await first.ctx.LMPanelPreview.request(false);
+    await settle();
+    first.host.fileStamp = stamp;
+    await first.ctx.LMPanelPreview.onClosed(event);
+    const { host } = await reopened(files, clean(1, 'S'));
+    assert.equal(host.units.length, 1, 'the unsaved edit still counts');
+  }
+});
+
+test('closing while saving is not trusted when the panel was not watching the history', async () => {
+  const files = {};
+  const first = await preparedPanel(files, clean(1, 'S'));
+  first.ctx.LMState.tab = 'export';
+  first.host.fileStamp = 'S2';
+  await first.ctx.LMPanelPreview.onClosed({ saving: { _value: 'yes' } });
+  const { host } = await reopened(files, clean(1, 'S2'));
+  assert.equal(host.units.length, 1);
 });
 
 test('reopening the panel over the same unsaved state keeps the pictures', async () => {
@@ -1208,4 +1257,58 @@ test('paste applies right away without a confirm dialog and reports what changed
   await ctx.LMUI.layers.pasteFromClipboard();
   assert.deepEqual(onIn(ctx, { A: 'a1', B: 'b1' }), [1, 2]);
   assert.match(statuses.join('\n'), /Aa1_Bb1에 붙여넣었습니다 \(켜짐 1개, 꺼짐 1개\)/);
+});
+
+// ---- 포토샵 미리보기: 켜 둔 채 패널을 닫아도 되돌릴 수 있다 (#13) ----
+
+function previewDoc(ctx, eyes) {
+  const layers = [L(1, null), L(2, null), L(3, null)].map(l => Object.assign(l, { visible: eyes[l.id] }));
+  setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [{ when: {}, layers: [2] }], layers });
+  const calls = [];
+  ctx.LMHost.call = async (fn, arg) => {
+    if (fn === 'applyVisibility') calls.push({ on: arr(arg.on), off: arr(arg.off) });
+    return fn === 'getLayers' ? ctx.LMState.layers.map(l => Object.assign({}, l)) : { ok: true };
+  };
+  return calls;
+}
+
+test('a photoshop preview left on survives reopening the panel, and turning it off brings the eyes back', async () => {
+  const storage = memoryStorage();
+  const first = loadPanel({ storage });
+  previewDoc(first.ctx, { 1: true, 2: true, 3: false });
+  await first.ctx.LMPreview.enable();
+  const { ctx } = loadPanel({ storage });
+  const calls = previewDoc(ctx, { 1: false, 2: true, 3: false });
+  ctx.LMPreview.restore('C:/a.psd', ctx.LMState.layers);
+  assert.equal(ctx.LMPreview.isOn(), true);
+  await ctx.LMPreview.disable();
+  assert.deepEqual(calls, [{ on: [1, 2], off: [3] }]);
+  const again = loadPanel({ storage });
+  previewDoc(again.ctx, { 1: false, 2: true, 3: false });
+  again.ctx.LMPreview.restore('C:/a.psd', again.ctx.LMState.layers);
+  assert.equal(again.ctx.LMPreview.isOn(), false, 'nothing left to restore after turning it off');
+});
+
+test('a stored photoshop preview is dropped when the eyes already match it (closed without saving)', async () => {
+  const storage = memoryStorage();
+  const first = loadPanel({ storage });
+  previewDoc(first.ctx, { 1: true, 2: true, 3: false });
+  await first.ctx.LMPreview.enable();
+  const { ctx } = loadPanel({ storage });
+  previewDoc(ctx, { 1: true, 2: true, 3: false });
+  ctx.LMPreview.restore('C:/a.psd', ctx.LMState.layers);
+  assert.equal(ctx.LMPreview.isOn(), false);
+  assert.equal(storage.getItem('lm.previewSnapshot:C:/a.psd'), null);
+});
+
+test('closing keeps a stored preview for a document with a file, and forgets it for one without', async () => {
+  const storage = memoryStorage();
+  const { ctx } = loadPanel({ storage });
+  previewDoc(ctx, { 1: true, 2: true, 3: false });
+  await ctx.LMPreview.enable();
+  ctx.LMState.docKey = 'Untitled-1';
+  await ctx.LMPreview.enable();
+  ctx.LMPreview.prune([]);
+  assert.ok(storage.getItem('lm.previewSnapshot:C:/a.psd'), 'may have been saved with the preview eyes');
+  assert.equal(storage.getItem('lm.previewSnapshot:Untitled-1'), null);
 });

@@ -696,7 +696,6 @@ var LM = LM || {};
     return f;
   }
 
-  var PREVIEW_STEP = 'LayerMemorier preview';
   // At or below this long side the picture is a draft: bilinear costs less than
   // Bicubic Sharper on a huge merged copy. The merge itself is always full size.
   var PREVIEW_DRAFT_MAX = 512;
@@ -707,37 +706,23 @@ var LM = LM || {};
     return r;
   }
 
-  // Redo steps the artist could still use: history states after the current one,
-  // except a greyed step this preview left behind (fallback in dropPreviewStep).
-  // Rendering would throw them away, so refuse instead.
-  function hasRedo() {
-    var d = executeActionGet(currentHistoryRef());
-    var index = d.getInteger(cid('ItmI'));
-    var count = d.getInteger(cid('Cnt '));
-    for (var i = index + 1; i <= count; i++) {
-      var r = new ActionReference();
-      r.putIndex(cid('HstS'), i);
-      if (executeActionGet(r).getString(cid('Nm  ')) !== PREVIEW_STEP) return true;
-    }
-    return false;
-  }
-
-  // Remove the preview's own history step. Deleting it (when it is the current state)
-  // leaves no greyed redo step behind; stepping back to `saved` would leave one.
-  // When the preview made no step (nothing to change), the current state is the
-  // artist's and must not be deleted.
-  function dropPreviewStep(doc, saved) {
+  // Runs fn() on a full duplicate of doc, which is the active document meanwhile; always
+  // closes it and makes doc active again. Previews hide layers on this copy because the
+  // original would stay changed: unless "Make Layer Visibility Changes Undoable" is on,
+  // neither stepping back nor deleting the history step brings the eyes back, and the
+  // document stays marked as modified (2026-11-06 probe, issues #12 and #13). Layer ids
+  // are the same on the copy, and copying is cheap: 170 ms for 4000x4000 with 120 layers.
+  function withPreviewCopy(doc, fn) {
+    var copy = null;
     try {
-      if (executeActionGet(currentHistoryRef()).getString(cid('Nm  ')) === PREVIEW_STEP) {
-        var desc = new ActionDescriptor();
-        desc.putReference(cid('null'), currentHistoryRef());
-        executeAction(cid('Dlt '), desc, DialogModes.NO);
-        return;
+      copy = doc.duplicate('lm_preview_src', false);
+      return fn(copy);
+    } finally {
+      if (copy) {
+        try { copy.close(SaveOptions.DONOTSAVECHANGES); } catch (e) {}
       }
-    } catch (e) {
-      // fall back below
+      app.activeDocument = doc;
     }
-    doc.activeHistoryState = saved;
   }
 
   function cleanPreviewFolder(folder) {
@@ -760,8 +745,7 @@ var LM = LM || {};
   }
 
   // Merged picture of one variation, at most maxSize px on the long side, as a temp PNG.
-  // The visibility change is one history step that is deleted afterwards, so the
-  // document and its history look untouched.
+  // Drawn on a copy, so the document, its history and its saved flag stay untouched.
   LM.renderPreview = wrap(function (a) {
     if (!hasDoc()) throw new Error('no document');
     activateExpected(a.doc);
@@ -769,21 +753,18 @@ var LM = LM || {};
     var started = new Date().getTime();
     var folder = previewFolder();
     cleanPreviewFolder(folder);
-    if (hasRedo()) throw new Error('LM_REDO_PENDING');
     var file = new File(folder.fsName + '/preview_' + started + '.png');
     var size = null;
-    var saved = doc.activeHistoryState;
     withoutDialogs(function () {
-      try {
-        applyVisibilityAs(PREVIEW_STEP, a.on, a.off);
-        withMergedDuplicate(doc, 'lm_preview_tmp', function (dup) {
+      withPreviewCopy(doc, function (copy) {
+        setVisibleMany(a.on, true);
+        setVisibleMany(a.off, false);
+        withMergedDuplicate(copy, 'lm_preview_tmp', function (dup) {
           shrinkPreview(dup, a.maxSize);
           sfwPng24(file, { interlaced: false, transparency: true, matte: 'none' });
           size = { width: dup.width.as('px'), height: dup.height.as('px') };
         });
-      } finally {
-        dropPreviewStep(doc, saved);
-      }
+      });
     });
     if (!file.exists) throw new Error('preview save failed, file not found: ' + file.fsName);
     return { path: String(file.fsName).replace(/\\/g, '/'), width: size.width, height: size.height, ms: new Date().getTime() - started };
@@ -791,15 +772,24 @@ var LM = LM || {};
 
   // ---- fast preview: one picture per layer, composited by the panel ----
 
+  function stampOf(f) {
+    return f.modified.getTime() + ':' + f.length;
+  }
+
   // Modified time and size of the document's file; null when it has no file yet.
   function fileStamp(d) {
     try {
-      var f = d.fullName;
-      return f.modified.getTime() + ':' + f.length;
+      return stampOf(d.fullName);
     } catch (e) {
       return null;
     }
   }
+
+  // Same stamp by path, for a document that was closed while saving: it can no longer be asked.
+  LM.getFileStamp = wrap(function (a) {
+    var f = new File(a.path);
+    return { stamp: f.exists ? stampOf(f) : null };
+  });
 
   function historyMark() {
     var d = executeActionGet(currentHistoryRef());
@@ -821,8 +811,8 @@ var LM = LM || {};
   });
 
   // Each unit shown alone (with its parent groups) on a transparent canvas of the document's
-  // shape, as a PNG in a.folder (kept between sessions) or the temp folder. Hides everything once, then each unit is a history step deleted
-  // right after its picture, so at most two steps exist at a time.
+  // shape, as a PNG in a.folder (kept between sessions) or the temp folder. Drawn on one copy
+  // per call: hides everything once, then shows each unit for its picture.
   // Stops after budgetMs so Photoshop can take input between calls; always finishes one unit.
   // Unlike renderPreview this refuses another active document: it runs many times in a row
   // and must not keep pulling the artist back.
@@ -837,37 +827,28 @@ var LM = LM || {};
       folder = new Folder(a.folder);
       ensureFolder(folder);
     }
-    if (hasRedo()) throw new Error('LM_REDO_PENDING');
-    var before = historyMark();
     var done = [];
-    var saved = doc.activeHistoryState;
-    function saveUnit(unit, file) {
-      var allOff = doc.activeHistoryState;
-      try {
-        applyVisibilityAs(PREVIEW_STEP, unit.on, []);
-        withMergedDuplicate(doc, 'lm_preview_tmp', function (dup) {
-          shrinkPreview(dup, a.maxSize);
-          sfwPng24(file, { interlaced: false, transparency: true, matte: 'none' });
-        });
-      } finally {
-        dropPreviewStep(doc, allOff);
-      }
-      if (!file.exists) throw new Error('preview save failed, file not found: ' + file.fsName);
-    }
     withoutDialogs(function () {
-      try {
-        applyVisibilityAs(PREVIEW_STEP, [], a.all);
+      withPreviewCopy(doc, function (copy) {
+        function saveUnit(unit, file) {
+          setVisibleMany(unit.on, true);
+          withMergedDuplicate(copy, 'lm_preview_tmp', function (dup) {
+            shrinkPreview(dup, a.maxSize);
+            sfwPng24(file, { interlaced: false, transparency: true, matte: 'none' });
+          });
+          setVisibleMany(unit.on, false);
+          if (!file.exists) throw new Error('preview save failed, file not found: ' + file.fsName);
+        }
+        setVisibleMany(a.all, false);
         for (var i = 0; i < a.units.length; i++) {
           var file = new File(folder.fsName + '/preview_layer_' + started + '_' + i + '.png');
           saveUnit(a.units[i], file);
           done.push({ key: a.units[i].key, path: String(file.fsName).replace(/\\/g, '/') });
           if (new Date().getTime() - started >= a.budgetMs) break;
         }
-      } finally {
-        dropPreviewStep(doc, saved);
-      }
+      });
     });
-    return { done: done, before: before, after: historyMark(), ms: new Date().getTime() - started };
+    return { done: done, ms: new Date().getTime() - started };
   });
 
   // Keys match the panel's docKey: full path when saved, otherwise the name.

@@ -16,9 +16,7 @@ const LMPanelPreview = (() => {
   const PREP_SLICE = 200;    // 레이어 준비: 한 번에 넘기는 그림 수 (호스트는 BATCH_MS가 지나면 먼저 멈춘다)
   const PERSIST_MS = 3000;   // 뽑는 중에 디스크의 목록을 고치는 간격
   const SWEEP_SLICE = 100;   // 안 쓰는 파일을 한 번에 지우는 수 (패널이 멈추지 않게 나눈다)
-  const MESSAGES = {
-    LM_REDO_PENDING: '다시 실행할 단계가 있어 미리보기를 미룹니다 (작업을 하나 하거나 다시 그리기)',
-  };
+  const SAVE_SETTLE_MS = 300; // 저장 이벤트 뒤 파일 스탬프를 읽기 전에 기다리는 시간
 
   const cache = LMCore.previewCache.createCache(20);
   const scheduler = LMCore.previewCache.createScheduler(draw);
@@ -64,11 +62,6 @@ const LMPanelPreview = (() => {
   function sizeText(p) {
     const s = sizeAt(p);
     return `${s.width}×${s.height}px`;
-  }
-
-  function message(e) {
-    const m = /LM_[A-Z0-9_]+/.exec(e.message);
-    return m && MESSAGES[m[0]] ? MESSAGES[m[0]] : e.message;
   }
 
   // 포토샵 미리보기와 같은 배리에이션(전체인 카테고리는 첫 값), 내보내기와 같은 표시 규칙.
@@ -263,7 +256,7 @@ const LMPanelPreview = (() => {
     return image;
   }
 
-  // 가시성 적용·복제본이 일으키는 이벤트는 패널 자신의 메아리다 (draw와 같은 이유).
+  // 복제본을 만들고 닫는 이벤트는 패널 자신의 메아리다 (draw와 같은 이유).
   async function callPictures(s, maxSize, units) {
     const doc = { name: LMState.docInfo.name, path: LMState.docInfo.path || null };
     hostCalls++;
@@ -289,8 +282,6 @@ const LMPanelPreview = (() => {
       s.pictures.set(d.key, { ids, maxSize, path: d.path });
       s.latest.set(ids.join('+'), d.path);
     }
-    // 뽑는 동안 생긴 히스토리 번호 변화는 작업자의 수정이 아니다.
-    if (sameMark(s.mark, r.before)) s.mark = r.after;
     persist(s, false);
   }
 
@@ -333,7 +324,7 @@ const LMPanelPreview = (() => {
   // 히스토리가 움직였으면 바뀌었을 레이어의 그림을 버린다. 붓질은 패널에 이벤트가 오지 않아 이렇게 알아챈다.
   // 앞으로 나아갔으면 그동안 선택돼 있던 레이어, 뒤로 갔으면 어느 레이어인지 모르므로 전부.
   async function checkChanges(fromRefresh) {
-    if (LMState.previewing || LMState.exporting) return false;
+    if (LMState.exporting) return false;
     const s = session();
     await ensureLoaded(s);
     let now = null;
@@ -390,7 +381,7 @@ const LMPanelPreview = (() => {
         r = await callPictures(s, t.maxSize, units);
       } catch (e) {
         if (/active document changed/.test(e.message)) LMApp.refresh();
-        else if (t.key === wanted) state.error = message(e);
+        else if (t.key === wanted) state.error = e.message;
         break;
       }
       if (t.docKey !== LMState.docKey) break;
@@ -469,7 +460,7 @@ const LMPanelPreview = (() => {
         r = await callPictures(s, maxSize, units);
       } catch (e) {
         if (/active document changed/.test(e.message)) LMApp.refresh();
-        stopped = message(e);
+        stopped = e.message;
         break;
       }
       if (job.docKey !== LMState.docKey) break;
@@ -501,10 +492,49 @@ const LMPanelPreview = (() => {
     return checkChanges(false).then(changed => (changed ? request(false) : undefined));
   }
 
+  // 히스토리를 계속 살피는 중인가. 아니면 마지막으로 본 상태가 오래됐을 수 있다 (onRefresh·onHover와 같은 조건).
+  function isWatching() { return isFast() && isOn() && LMState.tab === 'layers'; }
+
+  function samePath(a, b) {
+    return LMCore.previewCache.cacheFolderName(a) === LMCore.previewCache.cacheFolderName(b);
+  }
+
+  // 문서를 더 이상 읽을 수 없을 때: 파일 스탬프는 경로로 읽고, 마지막으로 본 뒤의 수정은
+  // 앞으로 나아간 히스토리처럼 선택돼 있던 레이어만 고친 것으로 친다 (checkChanges와 같은 규칙).
+  async function noteSavedFile(s, selected) {
+    let r = null;
+    try { r = await LMHost.call('getFileStamp', { path: s.path }); } catch (e) { return; }
+    // 파일이 그대로면 저장된 것이 없다 (닫힌 문서가 이 문서가 아니었다).
+    if (!s.mark || !r || !r.stamp || r.stamp === s.mark.stamp) return;
+    bump(s, new Set(selected));
+    s.mark = Object.assign({}, s.mark, { saved: true, stamp: r.stamp });
+    s.dirty = false;
+    persist(s, true);
+  }
+
   // 저장 이벤트: 보관한 그림이 새 파일과 맞는다고 적어 둔다 (다음에 열 때 그대로 쓰도록).
-  function onSaved() {
-    if (!sessions.has(LMState.docKey)) return Promise.resolve();
-    return checkChanges(true).then(changed => (changed && isFast() && isOn() ? request(false) : undefined));
+  // data.in은 저장한 파일이라 내보내기의 복제본 저장은 걸러진다. 백그라운드 저장은 saveStage로 끝을 알 수 있다.
+  function onSaved(data) {
+    const info = data || {};
+    const stage = info.saveStage && info.saveStage._value;
+    const file = info.in && info.in._path;
+    const s = sessions.get(LMState.docKey);
+    if (!s || (stage && stage !== 'saveSucceeded') || (file && s.path && !samePath(file, s.path))) return Promise.resolve();
+    const watching = isWatching();
+    const selected = s.lastSelected.concat(LMState.selectedIds);
+    return new Promise(resolve => setTimeout(resolve, SAVE_SETTLE_MS)).then(() => {
+      // 저장하고 바로 닫았으면 이미 다른 문서다.
+      if (sessions.get(LMState.docKey) !== s) return watching ? noteSavedFile(s, selected) : undefined;
+      return checkChanges(true).then(changed => (changed && isFast() && isOn() ? request(false) : undefined));
+    });
+  }
+
+  // 닫으면서 저장(저장 창에 "예")은 저장 이벤트 없이 닫기 이벤트의 saving으로만 알 수 있다 (2026-11-06 확인, #12).
+  function onClosed(data) {
+    if (!data || !data.saving || data.saving._value !== 'yes') return Promise.resolve();
+    const s = sessions.get(LMState.docKey);
+    if (!s || !s.path || !isWatching()) return Promise.resolve();
+    return noteSavedFile(s, s.lastSelected.concat(LMState.selectedIds));
   }
 
   // 닫힌 문서는 잊는다. 다시 열면 디스크에서 읽고, 그사이 파일이 바뀌었는지 확인한다.
@@ -526,7 +556,7 @@ const LMPanelPreview = (() => {
     state.busy = true;
     paint();
     const doc = { name: LMState.docInfo.name, path: LMState.docInfo.path || null };
-    // 가시성 적용·복제본 만들고 닫기·히스토리 정리가 일으키는 이벤트는 패널 자신의 메아리다.
+    // 복제본을 만들고 닫는 이벤트는 패널 자신의 메아리다.
     // 문서 전환·닫기 이벤트는 muteEcho로 걸러지지 않으므로 그리는 동안과 직후 잠깐은 무시한다 (main.js).
     LMApp.muteEcho();
     LMState.previewing = true;
@@ -537,7 +567,7 @@ const LMPanelPreview = (() => {
       cache.set(t.key, r.path);
       if (t.key === wanted) { state.path = r.path; state.error = ''; state.ms = r.ms; }
     } catch (e) {
-      if (t.key === wanted && t.docKey === LMState.docKey) state.error = message(e);
+      if (t.key === wanted && t.docKey === LMState.docKey) state.error = e.message;
     } finally {
       LMState.previewing = false;
       LMState.previewQuietUntil = Date.now() + 500;
@@ -622,5 +652,5 @@ const LMPanelPreview = (() => {
     attachCanvas();
   }
 
-  return { isOn, setOn, ratio, setRatio, isFast, setFast, percent, setPercent, fastHtml, qualityHtml, showPercent, attachCanvas, onHover, onSaved, prune, isPreparing, prepareAll, cancelPrepare, request, onRefresh, paneHtml, state };
+  return { isOn, setOn, ratio, setRatio, isFast, setFast, percent, setPercent, fastHtml, qualityHtml, showPercent, attachCanvas, onHover, onSaved, onClosed, prune, isPreparing, prepareAll, cancelPrepare, request, onRefresh, paneHtml, state };
 })();
