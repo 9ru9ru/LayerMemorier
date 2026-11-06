@@ -39,7 +39,7 @@ __lmResult;`;
   const args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', PS_EVAL, '-ScriptFile', file];
   if (!host) args.push('-NoHost');
   try {
-    return execFileSync('powershell.exe', args, { encoding: 'utf8', timeout: 180000 }).replace(/\r?\n$/, '');
+    return execFileSync('powershell.exe', args, { encoding: 'utf8', timeout: 180000, maxBuffer: 1 << 26 }).replace(/\r?\n$/, '');
   } finally {
     fs.unlinkSync(file);
   }
