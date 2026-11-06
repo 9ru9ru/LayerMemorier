@@ -23,43 +23,23 @@ function assertOnlyTestDocs() {
 
 const CLOSE_ALL = /while\s*\(\s*app\.documents\.length\s*\)/;
 
-function runFile(file, host) {
-  const args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', PS_EVAL, '-ScriptFile', file];
-  if (!host) args.push('-NoHost');
-  return execFileSync('powershell.exe', args, { encoding: 'utf8', timeout: 180000 }).replace(/\r?\n$/, '');
-}
-
-function runCode(code) {
-  fs.mkdirSync(TMP, { recursive: true });
-  const file = path.join(TMP, `run_${process.pid}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.jsx`);
-  fs.writeFileSync(file, '\uFEFF' + code, 'utf8');
-  try {
-    return runFile(file, false);
-  } finally {
-    fs.unlinkSync(file);
-  }
-}
-
-// 호환성 최대화 설정이 "묻기"면 PSD를 저장할 때 창이 떠서 테스트가 사람을 기다린다 (2026-11-06).
-// 테스트 프로세스 동안만 "항상"으로 두고, 끝나면 원래 값으로 되돌린다.
-let promptOff = false;
-function turnOffFormatPrompt() {
-  if (promptOff) return;
-  promptOff = true;
-  const was = runCode('String(app.preferences.maximizeCompatibility)');
-  runCode('app.preferences.maximizeCompatibility = QueryStateType.ALWAYS; "x"');
-  process.on('exit', () => runCode(`app.preferences.maximizeCompatibility = ${was}; "x"`));
-}
-
 // jsx 코드를 임시 파일에 써서 실행한다. 마지막 식의 값을 문자열로 돌려준다.
+// 호환성 최대화 설정이 "묻기"면 PSD를 저장할 때 창이 떠서 테스트가 사람을 기다린다 (2026-11-06).
+// 실행하는 동안만 "항상"으로 둔다. 스크립트 안에서 되돌리므로 테스트가 죽어도 설정이 바뀐 채 남지 않는다.
 function psRun(code, { host = true } = {}) {
-  turnOffFormatPrompt();
   if (CLOSE_ALL.test(code)) assertOnlyTestDocs();
   fs.mkdirSync(TMP, { recursive: true });
   const file = path.join(TMP, `run_${process.pid}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.jsx`);
-  fs.writeFileSync(file, '\uFEFF' + code, 'utf8');
+  const wrapped = `var __lmCompat = app.preferences.maximizeCompatibility;
+app.preferences.maximizeCompatibility = QueryStateType.ALWAYS;
+var __lmResult;
+try { __lmResult = eval(${JSON.stringify(code)}); } finally { app.preferences.maximizeCompatibility = __lmCompat; }
+__lmResult;`;
+  fs.writeFileSync(file, '\uFEFF' + wrapped, 'utf8');
+  const args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', PS_EVAL, '-ScriptFile', file];
+  if (!host) args.push('-NoHost');
   try {
-    return runFile(file, host);
+    return execFileSync('powershell.exe', args, { encoding: 'utf8', timeout: 180000 }).replace(/\r?\n$/, '');
   } finally {
     fs.unlinkSync(file);
   }
