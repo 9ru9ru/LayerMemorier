@@ -95,5 +95,19 @@
     }
   }
 
-  return { buildPlan, planUnits, unitOnIds, canvasMode, drawNodes };
+  // 전체 준비에서 뽑을 그림: 각 조합이 실제로 쓰는 그림(클리핑 묶음 포함)을 먼저, 그다음 나머지 레이어 한 장씩 (아래부터).
+  // visibleSets: 조합마다의 켜진 레이어 id 목록. 클리핑 레이어는 켜진 묶음마다 그림이 달라 미리 다 만들 수 없다.
+  function preloadUnits(layers, visibleSets) {
+    const seen = new Map();
+    for (const visible of visibleSets) {
+      for (const u of planUnits(buildPlan(layers, visible))) seen.set(u.ids.join('+'), u.ids);
+    }
+    for (let i = layers.length - 1; i >= 0; i--) {
+      const l = layers[i];
+      if (l.kind === 'layer' && !l.clipped && !seen.has(String(l.id))) seen.set(String(l.id), [l.id]);
+    }
+    return Array.from(seen.values());
+  }
+
+  return { buildPlan, planUnits, unitOnIds, canvasMode, drawNodes, preloadUnits };
 });

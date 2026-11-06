@@ -79,3 +79,15 @@ test('drawNodes draws in plan order, skips pictures not ready yet, and composite
     ['main', 'subCanvas', 'multiply'],
   ]);
 });
+
+test('preloadUnits lists the pictures every combo uses first, then each remaining layer alone', () => {
+  const { preloadUnits } = require('../../core/layer-composite');
+  const layers = [L(4, null), L(3, null, { clipped: true }), L(2, null), L(1, null)];
+  assert.deepEqual(preloadUnits(layers, [[1, 2, 3], [1]]), [[1], [2, 3], [2], [4]]);
+});
+
+test('preloadUnits leaves out groups and clipped layers on their own, and repeats nothing', () => {
+  const { preloadUnits } = require('../../core/layer-composite');
+  const layers = [G(10, null, 'passThrough'), L(3, 10), L(2, 10, { clipped: true }), L(1, 10)];
+  assert.deepEqual(preloadUnits(layers, [[10, 1], [10, 1]]), [[1], [3]]);
+});

@@ -270,6 +270,8 @@ LMUI.layers = (() => {
     }
     if (btn.dataset.action === 'combo-paste') return pasteFromClipboard();
     if (btn.dataset.action === 'pv-redraw') return LMPanelPreview.request(true);
+    if (btn.dataset.action === 'pv-prepare-all') return LMPanelPreview.prepareAll();
+    if (btn.dataset.action === 'pv-prepare-cancel') return LMPanelPreview.cancelPrepare();
     if (btn.dataset.action === 'orphans-clean') {
       LMState.docData.combos = C().pruneOrphans(LMState.docData.combos, LMState.layers);
       await LMApp.saveDocData();

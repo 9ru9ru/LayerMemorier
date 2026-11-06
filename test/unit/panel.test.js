@@ -579,6 +579,160 @@ test('when another document became active the panel stops extracting and refresh
   assert.equal(host.units.length, 0);
 });
 
+// ---- 빠른 그리기: 전체 준비 ----
+
+const manyLayers = n => Array.from({ length: n }, (_, i) => Object.assign(L(n - i, null), { mode: 'normal', clipped: false }));
+
+test('prepare-all extracts every layer, and checking any of them afterwards asks Photoshop for no picture', async () => {
+  const { ctx } = loadPanel();
+  fastDoc(ctx, [1]);
+  const host = fastHost(ctx);
+  await ctx.LMPanelPreview.prepareAll();
+  const all = host.units.flat().map(u => Array.from(u)[0]).sort();
+  assert.deepEqual(all, [1, 2, 3]);
+  const before = host.units.length;
+  ctx.LMState.docData.combos = [{ when: {}, layers: [2, 3] }];
+  await ctx.LMPanelPreview.request(false);
+  await settle();
+  assert.equal(host.units.length, before);
+  assert.deepEqual(lastDraw(ctx), [['2', 'source-over'], ['3', 'multiply']]);
+});
+
+test('prepare-all also covers the clipping pictures the existing combos need', async () => {
+  const { ctx } = loadPanel();
+  const C = (id, clipped) => Object.assign(L(id, null), { mode: 'normal', clipped });
+  setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [{ when: {}, layers: [1, 2] }], layers: [C(2, true), C(1, false)] });
+  ctx.LMPanelPreview.setOn(true);
+  ctx.LMPanelPreview.setFast(true);
+  const host = fastHost(ctx);
+  await ctx.LMPanelPreview.prepareAll();
+  assert.ok(host.units.flat().some(u => Array.from(u).join() === '1,2'));
+});
+
+test('pressing prepare-all again extracts only what is missing', async () => {
+  const { ctx } = loadPanel();
+  fastDoc(ctx, [1]);
+  const host = fastHost(ctx);
+  await ctx.LMPanelPreview.prepareAll();
+  const before = host.units.length;
+  await ctx.LMPanelPreview.prepareAll();
+  assert.equal(host.units.length, before);
+});
+
+test('prepare-all holds thousands of pictures without loading them all into memory', async () => {
+  const { ctx } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [{ when: {}, layers: [1] }], layers: manyLayers(600) });
+  ctx.LMPanelPreview.setOn(true);
+  ctx.LMPanelPreview.setFast(true);
+  const host = fastHost(ctx);
+  let images = 0;
+  const RealImage = ctx.Image;
+  ctx.Image = function () { images++; return new RealImage(); };
+  await ctx.LMPanelPreview.prepareAll();
+  await settle();
+  assert.ok(images < 10, `only the shown pictures are loaded, got ${images}`);
+  const before = host.units.length;
+  ctx.LMState.docData.combos = [{ when: {}, layers: [1, 2, 600] }];
+  await ctx.LMPanelPreview.request(false);
+  await settle();
+  assert.equal(host.units.length, before, 'none of the 600 pictures was forgotten');
+});
+
+test('cancelling prepare-all stops after the running batch and keeps what is done', async () => {
+  const { ctx } = loadPanel();
+  fastDoc(ctx, [1]);
+  const host = fastHost(ctx, { batch: 1 });
+  const done = ctx.LMPanelPreview.prepareAll();
+  assert.equal(ctx.LMPanelPreview.isPreparing(), true);
+  await new Promise(r => setTimeout(r, 0));
+  ctx.LMPanelPreview.cancelPrepare();
+  assert.equal(ctx.LMPanelPreview.isPreparing(), false);
+  await done;
+  await settle();
+  assert.equal(host.units.length, 1);
+  await ctx.LMPanelPreview.prepareAll();
+  assert.equal(host.units.length, 3, 'the next run extracts only the other two');
+});
+
+test('pressing prepare-all right after an edit extracts only the edited layer, even when no mouse move noticed it', async () => {
+  const { ctx } = loadPanel();
+  fastDoc(ctx, [1]);
+  const host = fastHost(ctx);
+  ctx.LMState.selectedIds = [2];
+  await ctx.LMPanelPreview.prepareAll();
+  const before = host.units.length;
+  host.mark = { id: 2, index: 6, count: 6, name: 'Brush' };
+  await ctx.LMPanelPreview.prepareAll();
+  assert.deepEqual(host.units.slice(before).map(b => b.map(u => Array.from(u))), [[[2]]]);
+});
+
+test('an edited layer that is off now is extracted again only when it is checked', async () => {
+  const { ctx } = loadPanel();
+  fastDoc(ctx, [1]);
+  const host = fastHost(ctx);
+  ctx.LMState.selectedIds = [2];
+  await ctx.LMPanelPreview.prepareAll();
+  const before = host.units.length;
+  host.mark = { id: 2, index: 6, count: 6, name: 'Brush' };
+  await ctx.LMPanelPreview.request(false);
+  await settle();
+  assert.equal(host.units.length, before, 'layer 2 is off, so nothing to draw yet');
+  ctx.LMState.docData.combos = [{ when: {}, layers: [1, 2] }];
+  await ctx.LMPanelPreview.request(false);
+  await settle();
+  assert.deepEqual(host.units.slice(before).map(b => b.map(u => Array.from(u))), [[[2]]]);
+});
+
+test('a failure stops prepare-all with a message on the status line', async () => {
+  const { ctx } = loadPanel();
+  fastDoc(ctx, [1]);
+  const host = fastHost(ctx);
+  const seen = [];
+  const call = ctx.LMHost.call;
+  ctx.LMHost.call = async (fn, a) => {
+    if (fn === 'renderLayerPictures') { seen.push(fn); throw new Error('renderLayerPictures: LM_REDO_PENDING'); }
+    return call(fn, a);
+  };
+  const status = [];
+  ctx.LMApp.status = m => status.push(m);
+  await ctx.LMPanelPreview.prepareAll();
+  assert.equal(seen.length, 1);
+  assert.equal(ctx.LMPanelPreview.isPreparing(), false);
+  assert.ok(status.some(m => /다시 실행할 단계/.test(m)), status.join('|'));
+  assert.equal(host.units.length, 0);
+});
+
+test('prepare-all stops when another document becomes active', async () => {
+  const { ctx } = loadPanel();
+  fastDoc(ctx, [1]);
+  fastHost(ctx, { batch: 1 });
+  const done = ctx.LMPanelPreview.prepareAll();
+  await new Promise(r => setTimeout(r, 0));
+  await ctx.LMPanelPreview.onRefresh(true);
+  await done;
+  assert.equal(ctx.LMPanelPreview.isPreparing(), false);
+});
+
+test('the layer tab shows the prepare button with fast mode, and cancel while it runs', async () => {
+  const { ctx, el } = loadPanel();
+  fastDoc(ctx, [1]);
+  fastHost(ctx, { batch: 1 });
+  const idle = el(900);
+  ctx.LMUI.layers.render(idle);
+  assert.match(idle.innerHTML, /data-action="pv-prepare-all"/);
+  const done = ctx.LMPanelPreview.prepareAll();
+  const running = el(900);
+  ctx.LMUI.layers.render(running);
+  assert.match(running.innerHTML, /data-action="pv-prepare-cancel"/);
+  assert.doesNotMatch(running.innerHTML, /data-action="pv-prepare-all"/);
+  ctx.LMPanelPreview.cancelPrepare();
+  await done;
+  ctx.LMPanelPreview.setFast(false);
+  const exact = el(900);
+  ctx.LMUI.layers.render(exact);
+  assert.doesNotMatch(exact.innerHTML, /pv-prepare/);
+});
+
 test('a new document drops the pictures of the old one', async () => {
   const { ctx } = loadPanel();
   fastDoc(ctx, [1]);
