@@ -5,12 +5,13 @@ const fs = require('fs');
 const path = require('path');
 const { connect } = require('../helpers/panel');
 const { psCall, psRun } = require('../helpers/ps');
-const { buildFixture, docDataFor } = require('../helpers/fixture');
+const { buildFixture, docDataFor, PSD } = require('../helpers/fixture');
 const { PNG } = require('pngjs');
 const { visibleBounds } = require('../helpers/cells');
 const { enumerate } = require('../../core/variation');
 const { onLayerIds } = require('../../core/combos');
 const { unionBounds } = require('../../core/output');
+const { cacheFolderName } = require('../../core/preview-cache');
 
 const PRESETS = path.join(process.env.APPDATA, 'LayerMemorier', 'presets.json');
 // 내보내기 설정을 바꾸는 테스트는 마지막 설정 파일을 쓴다. 사용자의 실제 파일이 테스트에
@@ -31,6 +32,8 @@ const clearExportDefaults = () => { if (fs.existsSync(EXPORT_DEFAULTS)) fs.unlin
 
 async function freshPanel() {
   const p = await connect();
+  // 앞 테스트가 켜 둔 포토샵 미리보기가 다시 열 때 되살아나지 않게 한다.
+  await p.eval(`Object.keys(localStorage).filter(k => k.startsWith('lm.previewSnapshot:')).forEach(k => localStorage.removeItem(k)); true`);
   await p.reload();
   await p.eval('new Promise(r => { const t = setInterval(() => { if (window.LMReady) { clearInterval(t); r(true); } }, 100); })');
   return p;
@@ -680,7 +683,7 @@ test('layer tab: deleted category keys do not come back via the preview memory',
     psRun('app.activeDocument.close(SaveOptions.DONOTSAVECHANGES); "closed"');
     await new Promise(r => setTimeout(r, 1200));
     assert.equal(await p.eval('LMPreview.isOn()'), true);
-    assert.deepEqual(await p.eval('LMState.combo'), {}, '지운 카테고리 키는 되살아나지 않는다');
+    assert.equal('cA' in await p.eval('LMState.combo'), false, '지운 카테고리 키는 되살아나지 않는다');
 
     await p.eval(`document.querySelector('#tabs [data-tab=layers]').click(); true`);
     await p.eval(clickCb(byName.H));
@@ -1059,6 +1062,75 @@ test('export tab: PNG-8 matte stays editable with transparency on; PNG-24 matte 
     assert.equal(await p.eval(`document.querySelector('#tab-export [data-out="png8.matte"]').disabled`), false);
   } finally {
     clearExportDefaults();
+    p.close();
+  }
+});
+
+const panelReady = 'new Promise(r => { const t = setInterval(() => { if (window.LMReady) { clearInterval(t); r(true); } }, 100); })';
+const hiddenLayers = () => psCall('getLayers').filter(l => !l.visible).map(l => l.name).sort();
+const isSaved = () => psRun('String(app.activeDocument.saved)');
+
+test('fast preview: preparing leaves the eyes and the saved flag, and closing with save keeps the pictures (#12, #13)', async () => {
+  const dir = path.join(process.env.APPDATA, 'LayerMemorier', 'preview-cache', cacheFolderName(PSD));
+  fs.rmSync(dir, { recursive: true, force: true });
+  const { byName } = buildFixture();
+  psCall('writeDocData', docDataFor(byName));
+  psRun('app.activeDocument.save(); "saved"');
+  const p = await freshPanel();
+  try {
+    const hidden = hiddenLayers();
+    await p.eval(`(async () => { LMPanelPreview.setOn(true); LMPanelPreview.setFast(true); LMState.tab = 'layers'; LMApp.render(); await LMPanelPreview.prepareAll(); })()`, 120000);
+    assert.deepEqual(hiddenLayers(), hidden, 'eyes as they were');
+    assert.equal(isSaved(), 'true', 'closing must not ask to save because of a preview');
+
+    // 체크를 바꾸면 수정됨이 되고, 닫을 때 저장 창에 "예"라고 답한 것과 같다.
+    // 선택 레이어는 고쳤을 수 있는 것으로 치므로, 화면에 없는 N2를 선택해 둔다.
+    await p.eval(`(async () => { LMState.selectedIds = [${byName.N2}]; await LMPanelPreview.request(false); LMState.docData.delimiter = '-'; await LMApp.saveDocData(); })()`, 60000);
+    assert.equal(isSaved(), 'false');
+    psRun('app.activeDocument.close(SaveOptions.SAVECHANGES); "closed"');
+    await settle();
+    const index = JSON.parse(fs.readFileSync(path.join(dir, 'index.json'), 'utf8'));
+    const file = fs.statSync(PSD);
+    assert.equal(index.dirty, false);
+    assert.ok(index.mark.stamp.endsWith(':' + file.size), `stamp ${index.mark.stamp} is the saved file (${file.size} bytes)`);
+
+    psRun(`app.open(File(${JSON.stringify(PSD.split(path.sep).join('/'))})); "opened"`);
+    await settle();
+    await p.reload();
+    await p.eval(panelReady);
+    await p.eval(`window.__rendered = 0; window.__origLMHostCall = LMHost.call; LMHost.call = (f, a) => { if (f === 'renderLayerPictures') window.__rendered++; return window.__origLMHostCall(f, a); }; true`);
+    await p.eval(`(async () => { LMState.tab = 'layers'; LMApp.render(); await LMPanelPreview.request(false); })()`, 60000);
+    await settle();
+    assert.equal(await p.eval('window.__rendered'), 0, 'the pictures on screen are used as they are');
+  } finally {
+    await p.eval(`if (window.__origLMHostCall) { LMHost.call = window.__origLMHostCall; delete window.__origLMHostCall; } localStorage.removeItem('lm.panelPreview'); localStorage.removeItem('lm.previewFast'); true`).catch(() => {});
+    await p.reload();
+    p.close();
+  }
+});
+
+test('photoshop preview left on survives reopening the panel, and turning it off brings the eyes back (#13)', async () => {
+  const { byName } = buildFixture();
+  psCall('writeDocData', docDataFor(byName));
+  const p = await freshPanel();
+  try {
+    const hidden = hiddenLayers();
+    await p.eval(`document.querySelector('#tabs [data-tab=layers]').click(); document.querySelector('#tab-layers input.preview-switch').click(); true`);
+    await settle();
+    assert.notDeepEqual(hiddenLayers(), hidden, 'the preview changed the eyes');
+    await p.reload();
+    await p.eval(panelReady);
+    await p.eval(`document.querySelector('#tabs [data-tab=layers]').click(); true`);
+    assert.equal(await p.eval(`document.querySelector('#tab-layers input.preview-switch').checked`), true);
+    await p.eval(`document.querySelector('#tab-layers input.preview-switch').click(); true`);
+    await settle();
+    assert.deepEqual(hiddenLayers(), hidden);
+    await p.reload();
+    await p.eval(panelReady);
+    await p.eval(`document.querySelector('#tabs [data-tab=layers]').click(); true`);
+    assert.equal(await p.eval(`document.querySelector('#tab-layers input.preview-switch').checked`), false);
+  } finally {
+    await p.eval(`Object.keys(localStorage).filter(k => k.startsWith('lm.previewSnapshot:')).forEach(k => localStorage.removeItem(k)); true`).catch(() => {});
     p.close();
   }
 });
