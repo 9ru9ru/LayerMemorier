@@ -1371,3 +1371,85 @@ test('conflicts still show with the folder view on', () => {
   ctx.LMUI.export.render(e);
   assert.match(e.innerHTML, /충돌: 같은 파일명/);
 });
+
+// ---- 레이어 탭: 조합 일괄 복사 (#14) ----
+
+function bulkDoc(ctx, combos) {
+  setupDoc(ctx, { categories: [cat('A', ['A1', 'A2']), cat('B', ['B1', 'B2', 'B3'])], combos, layers: [L(1, null), L(2, null), L(3, null)] });
+  ctx.LMState.combo = { A: 'A1', B: 'B1' };
+  const saves = [];
+  ctx.LMHost.call = async (fn, arg, text) => { if (fn === 'writeDocText') saves.push([arg, text]); return { ok: true }; };
+  const status = [];
+  ctx.LMApp.status = m => status.push(m);
+  return { saves, status };
+}
+const bulkOn = (ctx, when) => arr(ctx.LMCore.combos.onLayerIds(ctx.LMState.docData.combos, when));
+const A1_COMBOS = [{ when: { A: 'A1', B: 'B1' }, layers: [1] }, { when: { A: 'A1', B: 'B2' }, layers: [2] }, { when: { A: 'A1', B: 'B3' }, layers: [3] }];
+
+test('the bulk copy box opens from the layer tab with the current combo as source and shows the pair count', () => {
+  const { ctx, el } = loadPanel();
+  bulkDoc(ctx, A1_COMBOS);
+  const e = el(900);
+  ctx.LMUI.layers.render(e);
+  assert.match(e.innerHTML, /data-action="bulk-open"/);
+  assert.doesNotMatch(e.innerHTML, /data-action="bulk-run"/);
+  ctx.LMUI.layers.toggleBulkCopy();
+  ctx.LMUI.layers.render(e);
+  assert.match(e.innerHTML, /bulk-cat" data-cat="A" checked>A=A1/);
+  assert.match(e.innerHTML, /bulk-cat" data-cat="B" >B=B1/);
+  assert.match(e.innerHTML, /배리에이션 3개로/, 'A is fixed, B keeps its value: A2 B1, A2 B2, A2 B3');
+});
+
+test('running the bulk copy fills the empty targets, saves, and reports the result', async () => {
+  const { ctx } = loadPanel();
+  const { saves, status } = bulkDoc(ctx, A1_COMBOS.concat({ when: { A: 'A2', B: 'B2' }, layers: [3] }));
+  ctx.confirm = () => { throw new Error('nothing is overwritten, so no dialog'); };
+  ctx.LMUI.layers.toggleBulkCopy();
+  await ctx.LMUI.layers.runBulkCopy();
+  assert.deepEqual(bulkOn(ctx, { A: 'A2', B: 'B1' }), [1]);
+  assert.deepEqual(bulkOn(ctx, { A: 'A2', B: 'B2' }), [3], 'written target kept');
+  assert.deepEqual(bulkOn(ctx, { A: 'A2', B: 'B3' }), [3]);
+  assert.deepEqual(bulkOn(ctx, { A: 'A1', B: 'B1' }), [1], 'source unchanged');
+  assert.equal(saves.length, 1);
+  assert.equal(saves[0][0].path, 'C:/a.psd', 'names the document it means to write');
+  assert.equal(JSON.parse(saves[0][1]).combos.length, ctx.LMState.docData.combos.length, 'stores the text of the document data');
+  assert.match(status.join('|'), /복사 2개, 건너뜀 1개 \(이미 작성 1\)/);
+});
+
+test('overwriting asks first and says how many; answering no changes nothing', async () => {
+  const { ctx } = loadPanel();
+  const { saves } = bulkDoc(ctx, A1_COMBOS.concat({ when: { A: 'A2', B: 'B2' }, layers: [3] }));
+  ctx.LMUI.layers.toggleBulkCopy();
+  ctx.LMState.bulkCopy.overwrite = true;
+  const asked = [];
+  ctx.confirm = m => { asked.push(m); return false; };
+  await ctx.LMUI.layers.runBulkCopy();
+  assert.match(asked[0], /1개를 덮어씁니다/);
+  assert.deepEqual(bulkOn(ctx, { A: 'A2', B: 'B2' }), [3]);
+  assert.equal(saves.length, 0);
+  ctx.confirm = () => true;
+  await ctx.LMUI.layers.runBulkCopy();
+  assert.deepEqual(bulkOn(ctx, { A: 'A2', B: 'B2' }), [2]);
+  assert.equal(saves.length, 1);
+});
+
+test('nothing to copy reports why and does not save', async () => {
+  const { ctx } = loadPanel();
+  const { saves, status } = bulkDoc(ctx, []);
+  ctx.LMUI.layers.toggleBulkCopy();
+  await ctx.LMUI.layers.runBulkCopy();
+  assert.equal(saves.length, 0);
+  assert.match(status.join('|'), /복사 0개, 건너뜀 3개 \(원본 빔 3\)/);
+});
+
+test('two fixed categories with a chosen target copy only the matching variation', async () => {
+  const { ctx } = loadPanel();
+  bulkDoc(ctx, A1_COMBOS);
+  ctx.LMUI.layers.toggleBulkCopy();
+  ctx.LMState.bulkCopy.cats = { A: true, B: true };
+  ctx.LMState.bulkCopy.targets = { A: 'A2', B: 'B2' };
+  await ctx.LMUI.layers.runBulkCopy();
+  assert.deepEqual(bulkOn(ctx, { A: 'A2', B: 'B2' }), [1]);
+  assert.deepEqual(bulkOn(ctx, { A: 'A2', B: 'B1' }), []);
+  assert.deepEqual(bulkOn(ctx, { A: 'A2', B: 'B3' }), []);
+});

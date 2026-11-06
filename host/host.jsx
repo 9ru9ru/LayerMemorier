@@ -195,6 +195,13 @@ var LM = LM || {};
     }
   }
 
+  function storeDocData(text) {
+    xmpLib();
+    var xmp = readXmp();
+    xmp.setProperty(NS, 'data', text);
+    app.activeDocument.xmpMetadata.rawData = xmp.serialize();
+  }
+
   LM.writeDocData = wrap(function (a) {
     if (!hasDoc()) throw new Error('no document');
     // Two accepted shapes: the plain document data, or the envelope
@@ -205,12 +212,21 @@ var LM = LM || {};
       checkExpectedDoc(a.doc);
       data = a.data;
     }
-    xmpLib();
-    var xmp = readXmp();
-    xmp.setProperty(NS, 'data', JSON.stringify(data));
-    app.activeDocument.xmpMetadata.rawData = xmp.serialize();
+    storeDocData(JSON.stringify(data));
     return { ok: true };
   });
+
+  // The panel's save: text is the JSON to store, so nothing here parses it. json2.parse took
+  // 22 s on 578 KB (2026-11-06 probe) and the panel saves on every check; the XMP steps take
+  // 0.1 s even at 3 MB.
+  LM.writeDocText = function (expectJson, text) {
+    return wrap(function (expect) {
+      if (!hasDoc()) throw new Error('no document');
+      checkExpectedDoc(expect);
+      storeDocData(text);
+      return { ok: true };
+    })(expectJson);
+  };
 
   // ---- export ----
 

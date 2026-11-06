@@ -56,6 +56,8 @@ main.fill > .tab.active { flex: 1; min-height: 0; display: flex; flex-direction:
    잘려 A0_B2가 "A0 B2"로 보인다. 본문 글꼴을 쓰게 한다. */
 .combo-bar select { font: inherit; }
 .combo-bar .notice { font-size: 11px; }
+.combo-bar .bulk { border: 1px solid #444; padding: 2px 6px; margin: 4px 0; }
+.combo-bar .bulk .row > b { margin-right: 6px; }
 .tree { flex: 1; min-height: 0; overflow: auto; }
 /* 패널 미리보기 분할 (independent preview spec §4.2). Chromium 63: conic-gradient·flex gap 없음 */
 .lm-split { flex: 1; min-height: 0; display: flex; }

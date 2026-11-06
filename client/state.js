@@ -9,6 +9,7 @@ const LMState = {
   include: {},        // 이번만 내보낼 값 {categoryId: valueId[]} (세션)
   combo: {},          // 레이어 탭에서 고른 조합 {categoryId: valueId} (세션)
   comboClipboard: null, // 조합 복사 {docKey, label, ids} (세션, 문서가 바뀌면 비움)
+  bulkCopy: null,     // 조합 일괄 복사 칸 {cats: {categoryId: 고정}, targets: {categoryId: valueId, 없으면 전체}, overwrite} (세션, 닫으면 null)
   anchorId: null,     // Shift 범위 선택의 시작 행 id
   previews: {},       // 포토샵 미리보기 {docKey: {snapshot: {layerId: visible}, touched: [layerId], combo: 반영한 조합}} (디스크에도 보관, preview.js)
   exportOpen: {},     // 내보내기 탭 <details> 펼침 상태 {include, exclude, warnings} (세션)
@@ -53,10 +54,7 @@ const LMApp = {
   async saveDocData() {
     if (!LMState.docInfo || !LMState.docData) return;
     try {
-      await LMHost.call('writeDocData', {
-        doc: { name: LMState.docInfo.name, path: LMState.docInfo.path || null },
-        data: LMState.docData,
-      });
+      await LMHost.call('writeDocText', { name: LMState.docInfo.name, path: LMState.docInfo.path || null }, JSON.stringify(LMState.docData));
     } catch (e) {
       await this.refresh();
       this.status('저장 실패: ' + e.message);
@@ -69,7 +67,7 @@ const LMApp = {
   },
 
   // 포토샵에서 전부 읽은 뒤 LMState에 한꺼번에 넣는다. docInfo를 먼저 바꾸고 나머지를 나중에
-  // 읽으면, 그 사이의 저장이 새 문서 확인(writeDocData)을 통과해 이전 문서의 조합을 새 문서에 쓴다.
+  // 읽으면, 그 사이의 저장이 새 문서 확인(writeDocText)을 통과해 이전 문서의 조합을 새 문서에 쓴다.
   async refresh() {
     let notice = '';
     try {
@@ -100,6 +98,7 @@ const LMApp = {
         LMState.include = {};
         LMState.combo = {};
         LMState.comboClipboard = null; // 레이어 id는 문서마다 겹친다
+        LMState.bulkCopy = null;
         LMState.anchorId = null;
         LMState.docKey = key;
         if (dropped) notice = `변환하면서 레이어 ${dropped}개의 마크를 버렸습니다 (없는 카테고리·값 참조)`;

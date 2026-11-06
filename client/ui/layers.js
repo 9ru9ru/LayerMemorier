@@ -49,7 +49,37 @@ LMUI.layers = (() => {
     const clip = clipboard();
     const info = clip ? `<span class="hint">복사한 조합: ${esc(clip.label)} · 레이어 ${clip.ids.length}개</span>` : '';
     return `<div class="row clip"><button data-action="combo-copy" title="지금 조합에서 켜진 레이어를 기억합니다">조합 복사</button>` +
-      `<button data-action="combo-paste" ${clip ? '' : 'disabled'} title="복사한 조합과 똑같이 맞춥니다 (다른 조합은 그대로)">조합 붙여넣기</button>${info}</div>`;
+      `<button data-action="combo-paste" ${clip ? '' : 'disabled'} title="복사한 조합과 똑같이 맞춥니다 (다른 조합은 그대로)">조합 붙여넣기</button>` +
+      `<button data-action="bulk-open" title="기준값의 조합을 다른 값의 배리에이션으로 한 번에 옮깁니다">조합 일괄 복사…</button>${info}</div>`;
+  }
+
+  // 조합 일괄 복사 (#14): 지금 조합을 기준으로 삼아 고정할 카테고리와 대상 값을 고른다.
+  function bulkArgs(v) {
+    const b = LMState.bulkCopy;
+    const source = {}, targets = {};
+    for (const c of LMState.docData.categories) {
+      if (!b.cats[c.id]) continue;
+      source[c.id] = v[c.id];
+      targets[c.id] = c.values.some(x => x.id === b.targets[c.id]) ? [b.targets[c.id]] : c.values.map(x => x.id);
+    }
+    return { source, targets };
+  }
+
+  function bulkBar(cats, v) {
+    const b = LMState.bulkCopy;
+    if (!b) return '';
+    const valueName = c => { const x = c.values.find(x => x.id === v[c.id]); return x ? x.name : ''; };
+    const sources = cats.map(c => `<label class="pick"><input type="checkbox" class="bulk-cat" data-cat="${esc(c.id)}" ${b.cats[c.id] ? 'checked' : ''}>${esc(c.name)}=${esc(valueName(c))}</label>`).join('');
+    const targets = cats.filter(c => b.cats[c.id]).map(c => {
+      const opts = c.values.map(x => `<option value="${esc(x.id)}" ${b.targets[c.id] === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('');
+      return `<label class="pick">${esc(c.name)} <select class="bulk-target" data-cat="${esc(c.id)}"><option value="">전체</option>${opts}</select></label>`;
+    }).join('');
+    const args = bulkArgs(v);
+    const n = LMCore.bulkCopy.pairs(cats, args.source, args.targets).length;
+    return `<div class="bulk"><div class="row"><b>기준</b>${sources}<span class="hint">지금 조합에서 고정할 카테고리</span></div>` +
+      `<div class="row"><b>대상</b>${targets || '<span class="hint">기준을 하나 이상 고르세요</span>'}</div>` +
+      `<div class="row"><label class="pick"><input type="checkbox" class="bulk-overwrite" ${b.overwrite ? 'checked' : ''}> 이미 작성한 대상도 덮어쓰기</label>` +
+      `<button class="primary" data-action="bulk-run" ${n ? '' : 'disabled'}>복사</button><span class="hint">배리에이션 ${n}개로. 나머지 카테고리는 값을 그대로 둔 채 짝을 짓습니다.</span></div></div>`;
   }
 
   function noticeBar() {
@@ -103,7 +133,7 @@ LMUI.layers = (() => {
     }
     const noValues = cats.length && !variation ? '<p class="hint">값이 없는 카테고리가 있어 조합을 고를 수 없습니다. 카테고리 탭에서 값을 추가하세요.</p>' : '';
     const bar = cats.length
-      ? pickerBar(cats) + noValues + (variation ? clipBar() : '') + toggleBar() + noticeBar()
+      ? pickerBar(cats) + noValues + (variation ? clipBar() + bulkBar(cats, variation) : '') + toggleBar() + noticeBar()
       : '<p class="hint">카테고리 탭에서 카테고리를 먼저 만드세요.</p>';
     const tree = `<div class="tree">${visibleRows().map(l => row(l, onSet, namesByLayer)).join('')}</div>`;
     if (!cats.length || !LMPanelPreview.isOn()) {
@@ -240,6 +270,35 @@ LMUI.layers = (() => {
     return true;
   }
 
+  function toggleBulkCopy() {
+    const first = LMState.docData.categories[0];
+    LMState.bulkCopy = LMState.bulkCopy ? null : { cats: first ? { [first.id]: true } : {}, targets: {}, overwrite: false };
+    LMApp.render();
+  }
+
+  function bulkText(r) {
+    const why = [['이미 작성', r.skippedFilled], ['원본 빔', r.skippedEmpty], ['항상 뺄 조합', r.skippedExcluded], ['이미 같음', r.skippedSame]].filter(x => x[1]);
+    const skipped = why.reduce((n, x) => n + x[1], 0);
+    return `복사 ${r.copied}개` + (skipped ? `, 건너뜀 ${skipped}개 (${why.map(x => `${x[0]} ${x[1]}`).join(', ')})` : '');
+  }
+
+  async function runBulkCopy() {
+    const v = currentVariation();
+    if (!LMState.bulkCopy || !v) return;
+    const d = LMState.docData;
+    const args = bulkArgs(v);
+    const r = LMCore.bulkCopy.copy(d.combos, d.categories, args.source, args.targets, {
+      overwrite: LMState.bulkCopy.overwrite, excluded: d.excluded, layerIds: LMState.layers.map(l => l.id),
+    });
+    if (r.overwritten && !confirm(`이미 작성한 배리에이션 ${r.overwritten}개를 덮어씁니다.\n` +
+      '되돌릴 수 없습니다 (PSD를 저장하기 전이면 저장하지 않고 다시 열어 되돌릴 수 있습니다). 계속할까요?')) return;
+    if (!r.copied) return LMApp.status(bulkText(r));
+    d.combos = r.combos;
+    await LMApp.saveDocData();
+    LMApp.status(bulkText(r) + '. PSD를 저장해야 파일에 남습니다.');
+    return afterComboChange();
+  }
+
   async function onCheckbox(cb, rowEl, e) {
     const targets = checkboxTargets(Number(rowEl.dataset.layer), e.ctrlKey || e.metaKey);
     if (!setInCurrent(targets, !cb.classList.contains('checked'))) return;
@@ -269,6 +328,8 @@ LMUI.layers = (() => {
       return LMApp.render();
     }
     if (btn.dataset.action === 'combo-paste') return pasteFromClipboard();
+    if (btn.dataset.action === 'bulk-open') return toggleBulkCopy();
+    if (btn.dataset.action === 'bulk-run') return runBulkCopy();
     if (btn.dataset.action === 'pv-redraw') return LMPanelPreview.request(true);
     if (btn.dataset.action === 'pv-prepare-all') return LMPanelPreview.prepareAll();
     if (btn.dataset.action === 'pv-prepare-cancel') return LMPanelPreview.cancelPrepare();
@@ -280,6 +341,21 @@ LMUI.layers = (() => {
   }
 
   async function onChange(e) {
+    const bulkCat = e.target.closest('#tab-layers input.bulk-cat');
+    if (bulkCat) {
+      LMState.bulkCopy.cats[bulkCat.dataset.cat] = bulkCat.checked;
+      return LMApp.render();
+    }
+    const bulkTarget = e.target.closest('#tab-layers select.bulk-target');
+    if (bulkTarget) {
+      LMState.bulkCopy.targets[bulkTarget.dataset.cat] = bulkTarget.value;
+      return LMApp.render();
+    }
+    const bulkOverwrite = e.target.closest('#tab-layers input.bulk-overwrite');
+    if (bulkOverwrite) {
+      LMState.bulkCopy.overwrite = bulkOverwrite.checked;
+      return;
+    }
     const panelSw = e.target.closest('#tab-layers input.panel-preview-switch');
     if (panelSw) {
       LMPanelPreview.setOn(panelSw.checked);
@@ -367,5 +443,5 @@ LMUI.layers = (() => {
     }, 150);
   });
 
-  return { render, afterComboChange, checkboxTargets, setInCurrent, copyCombo, pastePlan, pasteCombo, pasteFromClipboard, resetCombos };
+  return { render, afterComboChange, checkboxTargets, setInCurrent, copyCombo, pastePlan, pasteCombo, pasteFromClipboard, resetCombos, toggleBulkCopy, runBulkCopy };
 })();

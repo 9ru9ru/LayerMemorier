@@ -22,9 +22,11 @@ const LMHost = (() => {
     return parse('ping', await raw('LM.ping()'));
   }
 
-  function call(fn, arg) {
-    const script = arg === undefined ? `LM.${fn}()` : `LM.${fn}(${JSON.stringify(JSON.stringify(arg))})`;
-    return raw(script).then(r => parse(fn, r));
+  // text: 호스트가 파싱하지 않을 긴 글 (LM.writeDocText). arg는 호스트의 json2로 파싱되는데, 몇백 KB부터 매우 느리다.
+  function call(fn, arg, text) {
+    const args = arg === undefined ? [] : [JSON.stringify(JSON.stringify(arg))];
+    if (text !== undefined) args.push(JSON.stringify(text));
+    return raw(`LM.${fn}(${args.join(', ')})`).then(r => parse(fn, r));
   }
 
   async function onEvents(handler) {

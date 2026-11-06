@@ -1162,3 +1162,31 @@ test('export tab: the folder view shows the same folders and counts as the expor
     p.close();
   }
 });
+
+test('layer tab: bulk copy through the panel moves the combos and stores them in the document (#14)', async () => {
+  const { byName } = buildFixture();
+  const data = docDataFor(byName);
+  data.combos = [
+    { when: { cA: 'a0', cB: 'b0', cN: 'n1' }, layers: [byName.A0] },
+    { when: { cA: 'a0', cB: 'b1', cN: 'n1' }, layers: [byName.B1] },
+    { when: { cA: 'a1', cB: 'b1', cN: 'n1' }, layers: [byName.N2] },
+  ];
+  psCall('writeDocData', data);
+  const p = await freshPanel();
+  try {
+    await p.eval(`document.querySelector('#tabs [data-tab=layers]').click(); document.querySelector('[data-action=bulk-open]').click(); true`);
+    await p.eval(setField('#tab-layers select.bulk-target', 'a1'));
+    await settle();
+    await p.shot('panel-bulk-copy');
+    assert.match(await p.eval(`document.querySelector('#tab-layers .bulk').textContent`), /배리에이션 6개로/);
+    await p.eval(`document.querySelector('[data-action=bulk-run]').click(); true`);
+    await settle();
+    assert.match(await p.eval(`document.getElementById('status').textContent`), /복사 1개, 건너뜀 5개 \(이미 작성 1, 원본 빔 4\)/);
+    const combos = psCall('readDocData').combos;
+    assert.deepEqual(onLayerIds(combos, { cA: 'a1', cB: 'b0', cN: 'n1' }), [byName.A0], 'stored in the document');
+    assert.deepEqual(onLayerIds(combos, { cA: 'a1', cB: 'b1', cN: 'n1' }), [byName.N2], 'a written target stays');
+    assert.deepEqual(onLayerIds(combos, { cA: 'a0', cB: 'b0', cN: 'n1' }), [byName.A0], 'the source stays');
+  } finally {
+    p.close();
+  }
+});

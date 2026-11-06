@@ -140,6 +140,21 @@ test('docData round-trips through XMP and survives save/reopen', () => {
   assert.deepEqual(psCall('readDocData'), data);
 });
 
+test('writeDocText stores the text as it is, refuses another document, and is quick on 3 MB', () => {
+  const info = psCall('getDocInfo');
+  const doc = { name: info.name, path: info.path || null };
+  const write = (expect, text) => JSON.parse(psRun(`LM.writeDocText(${JSON.stringify(JSON.stringify(expect))}, ${JSON.stringify(text)})`));
+  assert.deepEqual(write(doc, '{"version":2,"baseName":"한글 \\"따옴표\\""}'), { ok: true });
+  assert.deepEqual(psCall('readDocData'), { version: 2, baseName: '한글 "따옴표"' });
+  assert.match(write({ name: 'other.psd', path: 'C:/other.psd' }, '{}').error, /active document changed/);
+  const big = JSON.stringify({ version: 2, combos: Array.from({ length: 3000 }, (_, i) => ({ when: { a: 'v' + i }, layers: Array.from({ length: 150 }, (_, k) => k + i) })) });
+  assert.ok(big.length > 2e6, 'test data is large');
+  const started = Date.now();
+  assert.deepEqual(write(doc, big), { ok: true });
+  assert.ok(Date.now() - started < 15000, `took ${Date.now() - started} ms`);
+  assert.equal(psCall('readDocData').combos.length, 3000);
+});
+
 test('writeDocData keeps unicode intact', () => {
   buildFixture();
   const data = { version: 2, baseName: '알싸기 テスト', delimiter: '_', destination: 'D:/출력', categories: [], combos: [], excluded: [] };
