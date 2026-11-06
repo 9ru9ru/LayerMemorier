@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const { loadPanel } = require('../helpers/panel-vm');
 
 function setupDoc(ctx, { categories, combos, layers }) {
-  ctx.LMState.docInfo = { name: 'a.psd', path: 'C:/a.psd' };
+  ctx.LMState.docInfo = { name: 'a.psd', path: 'C:/a.psd', width: 10000, height: 8000 };
   ctx.LMState.docKey = 'C:/a.psd';
   ctx.LMState.docData = Object.assign(ctx.LMApp.newDocData('a'), { categories, combos });
   ctx.LMState.docData.output = ctx.LMCore.output.normalize(undefined);
@@ -130,7 +130,7 @@ test('turning the panel preview on renders once, then serves the same combo from
   assert.equal(renders.length, 2);
   assert.deepEqual(arr(renders[1][1].on), [2]);
   assert.deepEqual(arr(renders[1][1].off), [1]);
-  assert.equal(renders[0][1].maxSize, 1024);
+  assert.equal(renders[0][1].maxSize, 1000, 'default 10% of the 10000px long side');
   assert.match(ctx.LMPanelPreview.paneHtml(), /file:\/\/\/C:\/t\/preview_1\.png/);
 });
 
@@ -213,66 +213,120 @@ function captureRenders(ctx, ms = 1) {
   return sizes;
 }
 
-test('the picked preview quality is the size the host renders at', async () => {
+test('the preview renders at the picked percent of the original long side', async () => {
   const { ctx } = loadPanel();
   setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [], layers: [L(1, null)] });
   const sizes = captureRenders(ctx);
   ctx.LMPanelPreview.setOn(true);
-  ctx.LMPanelPreview.setQuality(512);
+  ctx.LMPanelPreview.setPercent(25);
   await ctx.LMPanelPreview.request(false);
-  assert.deepEqual(sizes, [512]);
+  assert.deepEqual(sizes, [2500]);
 });
 
-test('changing quality redraws the same combo, and going back to a drawn quality comes from the cache', async () => {
+test('changing the percent redraws the same combo, and going back to a drawn percent comes from the cache', async () => {
   const { ctx } = loadPanel();
   setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [], layers: [L(1, null)] });
   const sizes = captureRenders(ctx);
   ctx.LMPanelPreview.setOn(true);
   await ctx.LMPanelPreview.request(false);
-  ctx.LMPanelPreview.setQuality(256);
+  ctx.LMPanelPreview.setPercent(5);
   await ctx.LMPanelPreview.request(false);
   assert.match(ctx.LMPanelPreview.paneHtml(), /p2\.png/);
-  ctx.LMPanelPreview.setQuality(1024);
+  ctx.LMPanelPreview.setPercent(10);
   await ctx.LMPanelPreview.request(false);
-  assert.deepEqual(sizes, [1024, 256]);
+  assert.deepEqual(sizes, [1000, 500]);
   assert.match(ctx.LMPanelPreview.paneHtml(), /p1\.png/);
 });
 
-test('the quality is remembered in localStorage, and a stored value that is not offered falls back to 1024', async () => {
+test('the percent is remembered in localStorage, and a stored value that is not a number falls back to 10%', async () => {
   const { ctx } = loadPanel();
   setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [], layers: [L(1, null)] });
   const sizes = captureRenders(ctx);
   ctx.LMPanelPreview.setOn(true);
-  ctx.LMPanelPreview.setQuality(256);
-  assert.equal(ctx.localStorage.getItem('lm.previewQuality'), '256');
-  ctx.localStorage.setItem('lm.previewQuality', '9999');
+  ctx.LMPanelPreview.setPercent(25);
+  assert.equal(ctx.localStorage.getItem('lm.previewPercent'), '25');
+  ctx.localStorage.setItem('lm.previewPercent', 'abc');
   await ctx.LMPanelPreview.request(false);
-  assert.deepEqual(sizes, [1024]);
+  assert.deepEqual(sizes, [1000]);
 });
 
-test('the quality still applies for the session when localStorage throws', async () => {
+test('the percent still applies for the session when localStorage throws', async () => {
   const { ctx } = loadPanel({ storage: 'throw' });
   setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [], layers: [L(1, null)] });
   const sizes = captureRenders(ctx);
   ctx.LMPanelPreview.setOn(true);
-  ctx.LMPanelPreview.setQuality(256);
+  ctx.LMPanelPreview.setPercent(5);
   await ctx.LMPanelPreview.request(false);
-  assert.deepEqual(sizes, [256]);
+  assert.deepEqual(sizes, [500]);
 });
 
-test('the layer tab offers the quality picker only while the panel preview is on, with the current value selected', () => {
+test('the layer tab shows the quality slider and number only while the panel preview is on, with the result size', () => {
   const { ctx, el } = loadPanel();
   setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [], layers: [L(1, null)] });
   ctx.LMHost.call = async () => ({ path: 'C:/t/p.png', width: 1, height: 1, ms: 1 });
   const off = el(900);
   ctx.LMUI.layers.render(off);
-  assert.doesNotMatch(off.innerHTML, /panel-preview-quality/);
+  assert.doesNotMatch(off.innerHTML, /pv-quality/);
   ctx.LMPanelPreview.setOn(true);
-  ctx.LMPanelPreview.setQuality(512);
+  ctx.LMPanelPreview.setPercent(25);
   const on = el(900);
   ctx.LMUI.layers.render(on);
-  assert.match(on.innerHTML, /<option value="512" selected>/);
-  assert.doesNotMatch(on.innerHTML, /<option value="1024" selected>/);
+  assert.match(on.innerHTML, /type="range"[^>]*value="25"/);
+  assert.match(on.innerHTML, /type="number"[^>]*value="25"/);
+  assert.match(on.innerHTML, /2500×2000px/);
+});
+
+// 화질 칸 하나를 흉내 낸다. 리스너는 target.closest로 칸 묶음을 찾고 querySelector로 나머지 칸을 고친다.
+function qualityBox() {
+  const fields = { range: { value: '10' }, num: { value: '10' }, px: { textContent: '' } };
+  const box = { querySelector: s => (s.includes('range') ? fields.range : s.includes('num') ? fields.num : fields.px) };
+  for (const f of [fields.range, fields.num]) {
+    f.closest = s => (s.includes('pv-quality') ? box : s === '#tab-layers' ? {} : null);
+  }
+  return fields;
+}
+async function fireDoc(ctx, type, target) {
+  for (const fn of ctx.docListeners[type] || []) fn({ target });
+  await new Promise(r => setTimeout(r, 0));
+}
+
+test('dragging the slider only updates the fields, and releasing it renders once', async () => {
+  const { ctx } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [], layers: [L(1, null)] });
+  const sizes = captureRenders(ctx);
+  ctx.LMPanelPreview.setOn(true);
+  const f = qualityBox();
+  for (const v of ['20', '30']) {
+    f.range.value = v;
+    await fireDoc(ctx, 'input', f.range);
+  }
+  assert.deepEqual(sizes, [], 'no render while dragging');
+  assert.equal(f.num.value, 30);
+  assert.equal(f.px.textContent, '3000×2400px');
+  await fireDoc(ctx, 'change', f.range);
+  assert.deepEqual(sizes, [3000]);
+  assert.equal(ctx.localStorage.getItem('lm.previewPercent'), '30');
+});
+
+test('a typed percent is clamped when committed, and a blank one restores the current value without a new render', async () => {
+  const { ctx } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [], layers: [L(1, null)] });
+  const sizes = captureRenders(ctx);
+  ctx.LMPanelPreview.setOn(true);
+  const f = qualityBox();
+  f.num.value = '250';
+  await fireDoc(ctx, 'input', f.num);
+  assert.equal(f.num.value, '250', 'typing is not rewritten mid-way');
+  assert.equal(f.range.value, 100);
+  await fireDoc(ctx, 'change', f.num);
+  assert.equal(f.num.value, 100);
+  assert.deepEqual(sizes, [8192], '100% of 10000px, capped at the save limit');
+  f.num.value = '';
+  await fireDoc(ctx, 'input', f.num);
+  await fireDoc(ctx, 'change', f.num);
+  assert.equal(f.num.value, 100);
+  assert.equal(f.range.value, 100);
+  assert.deepEqual(sizes, [8192]);
 });
 
 test('the pane shows how long the last render took, but no time for a picture from the cache', async () => {
@@ -298,6 +352,255 @@ test('with the panel preview off, a combo change and a document refresh never re
   await ctx.LMPanelPreview.onRefresh(true);
   await new Promise(r => setTimeout(r, 0));
   assert.deepEqual(sizes, []);
+});
+
+// ---- 빠른 그리기: 레이어별 그림을 패널에서 합친다 ----
+
+// 호스트 흉내: 레이어 그림 호출을 모으고, 한 번에 batch개까지만 끝낸다. 히스토리 표시는 mark로 바꿀 수 있다.
+function fastHost(ctx, { batch = 100 } = {}) {
+  const host = { calls: [], units: [], mark: { id: 1, index: 5, count: 5, name: 'Brush' } };
+  ctx.LMHost.call = async (fn, arg) => {
+    if (fn === 'getHistoryMark') return host.mark;
+    if (fn === 'getLayers') return ctx.LMState.layers;
+    if (fn === 'getDocInfo') return ctx.LMState.docInfo;
+    if (fn === 'getOpenDocKeys') return [ctx.LMState.docKey];
+    if (fn === 'getSelectedLayerIds') return ctx.LMState.selectedIds;
+    if (fn === 'readDocData') return ctx.LMState.docData;
+    host.calls.push(fn);
+    if (fn !== 'renderLayerPictures') return { path: 'C:/t/exact.png', width: 1, height: 1, ms: 1 };
+    const todo = Array.from(arg.units).slice(0, batch);
+    host.units.push(todo.map(u => Array.from(u.on)));
+    return { done: todo.map(u => ({ key: u.key, path: 'C:/t/u' + Array.from(u.on).join('_') + '.png' })), before: host.mark, after: host.mark, ms: 500 };
+  };
+  return host;
+}
+const lastDraw = ctx => {
+  const log = Array.from(ctx.drawLog);
+  const i = log.map(e => e[0]).lastIndexOf('clear');
+  return log.slice(i + 1).map(e => [/u([\d_]+)\.png/.exec(e[0])[1], e[1]]);
+};
+const settle = () => new Promise(r => setTimeout(r, 80));
+const fastDoc = (ctx, on) => {
+  const M = (id, mode) => Object.assign(L(id, null), { mode, clipped: false });
+  setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [{ when: {}, layers: on }], layers: [M(3, 'multiply'), M(2, 'normal'), M(1, 'normal')] });
+  ctx.LMPanelPreview.setOn(true);
+  ctx.LMPanelPreview.setFast(true);
+};
+
+test('fast mode is off by default and then uses the exact render', async () => {
+  const { ctx } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [], layers: [L(1, null)] });
+  const host = fastHost(ctx);
+  ctx.LMPanelPreview.setOn(true);
+  assert.equal(ctx.LMPanelPreview.isFast(), false);
+  await ctx.LMPanelPreview.request(false);
+  assert.deepEqual(host.calls, ['renderPreview']);
+});
+
+test('fast mode extracts only the layers that are on, and composites them bottom first with their blend modes', async () => {
+  const { ctx } = loadPanel();
+  fastDoc(ctx, [1, 3]);
+  const host = fastHost(ctx);
+  await ctx.LMPanelPreview.request(false);
+  await settle();
+  assert.deepEqual(host.calls, ['renderLayerPictures']);
+  assert.deepEqual(Array.from(host.units[0], u => Array.from(u)), [[1], [3]]);
+  assert.deepEqual(lastDraw(ctx), [['1', 'source-over'], ['3', 'multiply']]);
+});
+
+test('fast mode sends every layer id for the hide-all, plus the size from the quality percent', async () => {
+  const { ctx } = loadPanel();
+  fastDoc(ctx, [1]);
+  let arg = null;
+  const host = fastHost(ctx);
+  const call = ctx.LMHost.call;
+  ctx.LMHost.call = (fn, a) => { if (fn === 'renderLayerPictures') arg = a; return call(fn, a); };
+  ctx.LMPanelPreview.setPercent(25);
+  await ctx.LMPanelPreview.request(false);
+  await settle();
+  assert.deepEqual(Array.from(arg.all), [3, 2, 1]);
+  assert.equal(arg.maxSize, 2500);
+  assert.ok(host.calls.length);
+});
+
+test('checking one more layer extracts only that layer, and unchecking asks Photoshop for no picture', async () => {
+  const { ctx } = loadPanel();
+  fastDoc(ctx, [1]);
+  const host = fastHost(ctx);
+  await ctx.LMPanelPreview.request(false);
+  await settle();
+  ctx.LMState.docData.combos = [{ when: {}, layers: [1, 2] }];
+  await ctx.LMPanelPreview.request(false);
+  await settle();
+  assert.deepEqual(host.units.map(b => b.map(u => Array.from(u))), [[[1]], [[2]]]);
+  assert.deepEqual(lastDraw(ctx), [['1', 'source-over'], ['2', 'source-over']]);
+  ctx.LMState.docData.combos = [{ when: {}, layers: [1] }];
+  await ctx.LMPanelPreview.request(false);
+  await settle();
+  assert.equal(host.units.length, 2, 'no new extraction');
+  assert.deepEqual(lastDraw(ctx), [['1', 'source-over']]);
+});
+
+test('extraction continues over several host calls until every layer is ready, showing progress', async () => {
+  const { ctx } = loadPanel();
+  fastDoc(ctx, [1, 2, 3]);
+  const host = fastHost(ctx, { batch: 1 });
+  const seen = [];
+  const call = ctx.LMHost.call;
+  ctx.LMHost.call = async (fn, a) => { if (fn === 'renderLayerPictures') seen.push(ctx.LMPanelPreview.paneHtml()); return call(fn, a); };
+  await ctx.LMPanelPreview.request(false);
+  await settle();
+  assert.equal(host.calls.length, 3);
+  assert.match(seen[0], /0\/3/);
+  assert.match(seen[2], /2\/3/);
+  assert.deepEqual(lastDraw(ctx).map(e => e[0]), ['1', '2', '3']);
+  assert.doesNotMatch(ctx.LMPanelPreview.paneHtml(), /\/3/);
+});
+
+test('a host that finishes nothing does not make the panel loop forever', async () => {
+  const { ctx } = loadPanel();
+  fastDoc(ctx, [1]);
+  const host = fastHost(ctx);
+  const call = ctx.LMHost.call;
+  ctx.LMHost.call = async (fn, a) => { const r = await call(fn, a); return fn === 'renderLayerPictures' ? { done: [], before: r.before, after: r.after, ms: 1 } : r; };
+  await ctx.LMPanelPreview.request(false);
+  await settle();
+  assert.equal(host.calls.length, 1);
+});
+
+test('redraw extracts the layers of the current combo again', async () => {
+  const { ctx } = loadPanel();
+  fastDoc(ctx, [1, 2]);
+  const host = fastHost(ctx);
+  await ctx.LMPanelPreview.request(false);
+  await settle();
+  await ctx.LMPanelPreview.request(true);
+  await settle();
+  assert.deepEqual(host.units.map(b => b.length), [2, 2]);
+});
+
+test('after an edit only the selected layer is extracted again', async () => {
+  const { ctx } = loadPanel();
+  fastDoc(ctx, [1, 2]);
+  const host = fastHost(ctx);
+  ctx.LMState.selectedIds = [2];
+  await ctx.LMPanelPreview.request(false);
+  await settle();
+  host.mark = { id: 2, index: 6, count: 6, name: 'Brush' };
+  await ctx.LMPanelPreview.request(false);
+  await settle();
+  assert.deepEqual(host.units.map(b => b.map(u => Array.from(u))), [[[1], [2]], [[2]]]);
+});
+
+test('a layer edited before the selection moved is extracted again too', async () => {
+  const { ctx } = loadPanel();
+  fastDoc(ctx, [1, 2]);
+  const host = fastHost(ctx);
+  ctx.LMState.selectedIds = [2];
+  await ctx.LMPanelPreview.request(false);
+  await settle();
+  host.mark = { id: 2, index: 6, count: 6, name: 'Brush' };
+  ctx.LMState.selectedIds = [1];
+  await ctx.LMPanelPreview.request(false);
+  await settle();
+  assert.deepEqual(host.units[1].map(u => Array.from(u)), [[1], [2]]);
+});
+
+test('going back in history extracts every layer again, because any layer may have changed', async () => {
+  const { ctx } = loadPanel();
+  fastDoc(ctx, [1, 2]);
+  const host = fastHost(ctx);
+  ctx.LMState.selectedIds = [];
+  await ctx.LMPanelPreview.request(false);
+  await settle();
+  host.mark = { id: 9, index: 3, count: 5, name: 'Move' };
+  await ctx.LMPanelPreview.request(false);
+  await settle();
+  assert.deepEqual(host.units[1].map(u => Array.from(u)), [[1], [2]]);
+});
+
+test('the history step shift caused by extraction itself does not count as an edit', async () => {
+  const { ctx } = loadPanel();
+  fastDoc(ctx, [1]);
+  const host = fastHost(ctx);
+  await ctx.LMPanelPreview.request(false);
+  await settle();
+  const call = ctx.LMHost.call;
+  ctx.LMHost.call = async (fn, a) => {
+    const r = await call(fn, a);
+    if (fn !== 'renderLayerPictures') return r;
+    const after = { id: null, index: 3, count: 3, name: 'Brush' };
+    host.mark = after;
+    return Object.assign(r, { after });
+  };
+  host.mark = { id: null, index: 5, count: 5, name: 'Brush' };
+  ctx.LMState.docData.combos = [{ when: {}, layers: [1, 2] }];
+  await ctx.LMPanelPreview.request(false);
+  await settle();
+  const extractions = host.units.length;
+  await ctx.LMPanelPreview.request(false);
+  await settle();
+  assert.equal(host.units.length, extractions);
+});
+
+test('coming back to the panel picks up an edit once, without asking again on every mouse move', async () => {
+  const { ctx } = loadPanel();
+  fastDoc(ctx, [1]);
+  const host = fastHost(ctx);
+  ctx.LMState.selectedIds = [1];
+  await ctx.LMPanelPreview.request(false);
+  await settle();
+  host.mark = { id: 2, index: 6, count: 6, name: 'Brush' };
+  await ctx.LMPanelPreview.onHover();
+  await settle();
+  assert.equal(host.units.length, 2, 'the edited layer is extracted again');
+  host.mark = { id: 3, index: 7, count: 7, name: 'Brush' };
+  await ctx.LMPanelPreview.onHover();
+  await settle();
+  assert.equal(host.units.length, 2, 'too soon after the last check');
+});
+
+test('when another document became active the panel stops extracting and refreshes', async () => {
+  const { ctx } = loadPanel();
+  fastDoc(ctx, [1, 2]);
+  const host = fastHost(ctx);
+  const seen = [];
+  const call = ctx.LMHost.call;
+  ctx.LMHost.call = async (fn, a) => {
+    seen.push(fn);
+    if (fn === 'renderLayerPictures') throw new Error('renderLayerPictures: active document changed: panel expected "a" but Photoshop has "b"');
+    return call(fn, a);
+  };
+  await ctx.LMPanelPreview.onRefresh(false);
+  await settle();
+  assert.equal(seen.filter(f => f === 'renderLayerPictures').length, 1);
+  assert.ok(seen.includes('getDocInfo'), 'refreshed');
+  assert.doesNotMatch(ctx.LMPanelPreview.paneHtml(), /active document/);
+  assert.equal(host.units.length, 0);
+});
+
+test('a new document drops the pictures of the old one', async () => {
+  const { ctx } = loadPanel();
+  fastDoc(ctx, [1]);
+  const host = fastHost(ctx);
+  await ctx.LMPanelPreview.request(false);
+  await settle();
+  await ctx.LMPanelPreview.onRefresh(true);
+  await settle();
+  assert.deepEqual(host.units.length, 2);
+});
+
+test('the layer tab offers the fast switch only while the panel preview is on', () => {
+  const { ctx, el } = loadPanel();
+  setupDoc(ctx, { categories: [cat('A', ['a'])], combos: [], layers: [L(1, null)] });
+  fastHost(ctx);
+  const off = el(900);
+  ctx.LMUI.layers.render(off);
+  assert.doesNotMatch(off.innerHTML, /panel-preview-fast/);
+  ctx.LMPanelPreview.setOn(true);
+  const on = el(900);
+  ctx.LMUI.layers.render(on);
+  assert.match(on.innerHTML, /panel-preview-fast/);
 });
 
 test('a queued render for a combo the user already left is skipped (only the shown one renders)', async () => {

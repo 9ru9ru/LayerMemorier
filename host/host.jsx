@@ -95,7 +95,10 @@ var LM = LM || {};
         depth: stack.length,
         parentId: stack.length ? stack[stack.length - 1] : null,
         // A lone Background layer has no 'Clr ' key; reading it threw and broke the whole list.
-        color: d.hasKey(cid('Clr ')) ? typeIDToStringID(d.getEnumerationValue(cid('Clr '))) : 'none'
+        color: d.hasKey(cid('Clr ')) ? typeIDToStringID(d.getEnumerationValue(cid('Clr '))) : 'none',
+        // For the fast preview. Guarded for the same reason as 'Clr '.
+        mode: d.hasKey(cid('Md  ')) ? typeIDToStringID(d.getEnumerationValue(cid('Md  '))) : 'normal',
+        clipped: d.hasKey(sid('group')) ? d.getBoolean(sid('group')) : false
       };
       out.push(item);
       if (item.kind === 'group') stack.push(item.id);
@@ -724,6 +727,25 @@ var LM = LM || {};
     doc.activeHistoryState = saved;
   }
 
+  function cleanPreviewFolder(folder) {
+    if (previewCleaned) return;
+    var old = folder.getFiles('preview_*.png');
+    for (var i = 0; i < old.length; i++) {
+      try { old[i].remove(); } catch (e) {}
+    }
+    previewCleaned = true;
+  }
+
+  function shrinkPreview(dup, maxSize) {
+    var w = dup.width.as('px');
+    var h = dup.height.as('px');
+    var k = Math.min(1, maxSize / Math.max(w, h));
+    if (k < 1) {
+      var method = maxSize <= PREVIEW_DRAFT_MAX ? ResampleMethod.BILINEAR : ResampleMethod.BICUBICSHARPER;
+      dup.resizeImage(px(Math.max(1, Math.round(w * k))), px(Math.max(1, Math.round(h * k))), undefined, method);
+    }
+  }
+
   // Merged picture of one variation, at most maxSize px on the long side, as a temp PNG.
   // The visibility change is one history step that is deleted afterwards, so the
   // document and its history look untouched.
@@ -733,13 +755,7 @@ var LM = LM || {};
     var doc = app.activeDocument;
     var started = new Date().getTime();
     var folder = previewFolder();
-    if (!previewCleaned) {
-      var old = folder.getFiles('preview_*.png');
-      for (var i = 0; i < old.length; i++) {
-        try { old[i].remove(); } catch (e) {}
-      }
-      previewCleaned = true;
-    }
+    cleanPreviewFolder(folder);
     if (hasRedo()) throw new Error('LM_REDO_PENDING');
     var file = new File(folder.fsName + '/preview_' + started + '.png');
     var size = null;
@@ -748,13 +764,7 @@ var LM = LM || {};
       try {
         applyVisibilityAs(PREVIEW_STEP, a.on, a.off);
         withMergedDuplicate(doc, 'lm_preview_tmp', function (dup) {
-          var w = dup.width.as('px');
-          var h = dup.height.as('px');
-          var k = Math.min(1, a.maxSize / Math.max(w, h));
-          if (k < 1) {
-            var method = a.maxSize <= PREVIEW_DRAFT_MAX ? ResampleMethod.BILINEAR : ResampleMethod.BICUBICSHARPER;
-            dup.resizeImage(px(Math.max(1, Math.round(w * k))), px(Math.max(1, Math.round(h * k))), undefined, method);
-          }
+          shrinkPreview(dup, a.maxSize);
           sfwPng24(file, { interlaced: false, transparency: true, matte: 'none' });
           size = { width: dup.width.as('px'), height: dup.height.as('px') };
         });
@@ -764,6 +774,70 @@ var LM = LM || {};
     });
     if (!file.exists) throw new Error('preview save failed, file not found: ' + file.fsName);
     return { path: String(file.fsName).replace(/\\/g, '/'), width: size.width, height: size.height, ms: new Date().getTime() - started };
+  });
+
+  // ---- fast preview: one picture per layer, composited by the panel ----
+
+  function historyMark() {
+    var d = executeActionGet(currentHistoryRef());
+    return {
+      id: d.hasKey(sid('ID')) ? d.getInteger(sid('ID')) : null,
+      index: d.getInteger(cid('ItmI')),
+      count: d.getInteger(cid('Cnt ')),
+      name: d.getString(cid('Nm  '))
+    };
+  }
+
+  // Brush strokes send the panel no event; a new history state is how it notices them.
+  LM.getHistoryMark = wrap(function () {
+    if (!hasDoc()) return null;
+    return historyMark();
+  });
+
+  // Each unit shown alone (with its parent groups) on a transparent canvas of the document's
+  // shape, as a temp PNG. Hides everything once, then each unit is a history step deleted
+  // right after its picture, so at most two steps exist at a time.
+  // Stops after budgetMs so Photoshop can take input between calls; always finishes one unit.
+  // Unlike renderPreview this refuses another active document: it runs many times in a row
+  // and must not keep pulling the artist back.
+  LM.renderLayerPictures = wrap(function (a) {
+    if (!hasDoc()) throw new Error('no document');
+    checkExpectedDoc(a.doc);
+    var doc = app.activeDocument;
+    var started = new Date().getTime();
+    var folder = previewFolder();
+    cleanPreviewFolder(folder);
+    if (hasRedo()) throw new Error('LM_REDO_PENDING');
+    var before = historyMark();
+    var done = [];
+    var saved = doc.activeHistoryState;
+    function saveUnit(unit, file) {
+      var allOff = doc.activeHistoryState;
+      try {
+        applyVisibilityAs(PREVIEW_STEP, unit.on, []);
+        withMergedDuplicate(doc, 'lm_preview_tmp', function (dup) {
+          shrinkPreview(dup, a.maxSize);
+          sfwPng24(file, { interlaced: false, transparency: true, matte: 'none' });
+        });
+      } finally {
+        dropPreviewStep(doc, allOff);
+      }
+      if (!file.exists) throw new Error('preview save failed, file not found: ' + file.fsName);
+    }
+    withoutDialogs(function () {
+      try {
+        applyVisibilityAs(PREVIEW_STEP, [], a.all);
+        for (var i = 0; i < a.units.length; i++) {
+          var file = new File(folder.fsName + '/preview_layer_' + started + '_' + i + '.png');
+          saveUnit(a.units[i], file);
+          done.push({ key: a.units[i].key, path: String(file.fsName).replace(/\\/g, '/') });
+          if (new Date().getTime() - started >= a.budgetMs) break;
+        }
+      } finally {
+        dropPreviewStep(doc, saved);
+      }
+    });
+    return { done: done, before: before, after: historyMark(), ms: new Date().getTime() - started };
   });
 
   // Keys match the panel's docKey: full path when saved, otherwise the name.

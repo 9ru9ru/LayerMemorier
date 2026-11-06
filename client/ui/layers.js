@@ -35,7 +35,7 @@ LMUI.layers = (() => {
   function toggleBar() {
     const panel = `<label class="preview-toggle" title="레이어 탭 왼쪽에 지금 조합을 그립니다 (큰 문서는 한 번에 몇 초 걸릴 수 있음)"><input type="checkbox" class="panel-preview-switch" ${LMPanelPreview.isOn() ? 'checked' : ''}> 패널 미리보기</label>`;
     const reset = `<button class="danger reset" data-action="combos-reset" ${LMState.docData.combos.length ? '' : 'disabled'} title="모든 조합의 레이어 켜짐·꺼짐 정보를 지웁니다 (카테고리·내보내기 설정은 그대로)">초기화</button>`;
-    const quality = LMPanelPreview.isOn() ? LMPanelPreview.qualityHtml() : '';
+    const quality = LMPanelPreview.isOn() ? LMPanelPreview.fastHtml() + LMPanelPreview.qualityHtml() : '';
     return `<div class="row made">${panel}${quality}${LMPreview.toggleHtml()}${reset}</div>`;
   }
 
@@ -117,6 +117,7 @@ LMUI.layers = (() => {
         `<div class="lm-main"><div class="combo-bar">${bar}</div>${tree}</div></div>`;
     }
     el.querySelector('.tree').scrollTop = keep;
+    LMPanelPreview.attachCanvas();
   }
 
   // 조합 선택이나 조합 데이터가 바뀐 뒤: 먼저 그리고, 미리보기가 켜져 있으면 반영한 뒤 눈 아이콘을 다시 그린다.
@@ -283,9 +284,18 @@ LMUI.layers = (() => {
       LMApp.render();
       return LMPanelPreview.request(false);
     }
-    const quality = e.target.closest('#tab-layers select.panel-preview-quality');
-    if (quality) {
-      LMPanelPreview.setQuality(Number(quality.value));
+    const fastSw = e.target.closest('#tab-layers input.panel-preview-fast');
+    if (fastSw) {
+      LMPanelPreview.setFast(fastSw.checked);
+      LMApp.render();
+      return LMPanelPreview.request(false);
+    }
+    const qualityBox = e.target.closest('#tab-layers .pv-quality');
+    if (qualityBox) {
+      const typed = LMCore.previewCache.clampPercent(e.target.value);
+      const p = typed == null ? LMPanelPreview.percent() : typed;
+      LMPanelPreview.setPercent(p);
+      LMPanelPreview.showPercent(qualityBox, p);
       return LMPanelPreview.request(false);
     }
     const sw = e.target.closest('#tab-layers input.preview-switch');
@@ -308,6 +318,20 @@ LMUI.layers = (() => {
   document.addEventListener('change', e => {
     if (!e.target.closest('#tab-layers')) return;
     onChange(e).catch(err => LMApp.status(err.message));
+  });
+
+  // 빠른 그리기: 패널로 돌아오면 그사이 수정을 반영한다.
+  document.addEventListener('mouseover', e => {
+    if (!e.target.closest('#tab-layers')) return;
+    LMPanelPreview.onHover().catch(err => LMApp.status(err.message));
+  });
+
+  // 화질 슬라이더·숫자 칸: 끄는 동안·치는 동안은 표시만 맞추고 그리지 않는다. 놓거나 입력을 마치면 onChange가 그린다.
+  document.addEventListener('input', e => {
+    const box = e.target.closest('#tab-layers .pv-quality');
+    if (!box) return;
+    const p = LMCore.previewCache.clampPercent(e.target.value);
+    if (p != null) LMPanelPreview.showPercent(box, p, e.target);
   });
 
   // 그림/목록 경계 끌기. 끄는 동안은 너비만 바꾸고, 놓으면 비율을 기억한다.

@@ -46,6 +46,63 @@ test('renderPreview downsizes the lower qualities with bilinear and the top qual
   }
 });
 
+// ---- 빠른 그리기: 레이어별 그림 ----
+
+const layerArgs = (ps, extra) => Object.assign({
+  doc: ps.docRef, all: [1, 2, 3], maxSize: 1350, budgetMs: 60000,
+  units: [{ key: 'k1', on: [1] }, { key: 'k2', on: [2, 3] }],
+}, extra);
+
+test('renderLayerPictures hides everything once, shows each unit alone, saves it, and leaves history untouched', () => {
+  const { LM, ps } = loadHost({ width: 12000, height: 13500 });
+  const r = call(LM, 'renderLayerPictures', layerArgs(ps));
+  assert.ok(!r.error, r.error);
+  assert.deepEqual(r.done.map(d => d.key), ['k1', 'k2']);
+  for (const d of r.done) assert.match(d.path, /LayerMemorier\/preview_layer_\d+_\d+\.png$/);
+  assert.equal(new Set(r.done.map(d => d.path)).size, 2, 'one file per unit');
+  assert.deepEqual(shown(ps).map(e => e[0]), ['Hd  ', 'Shw ', 'Shw '], 'the hide-all is sent once');
+  assert.equal(ps.closedDuplicates, 2);
+  assert.equal(ps.log.filter(e => e[0] === 'resize').length, 2);
+  assert.deepEqual(historyNow(ps), ps.before, 'history list and current state untouched');
+});
+
+test('renderLayerPictures stops at the time budget but always finishes one unit', () => {
+  const { LM, ps } = loadHost();
+  const r = call(LM, 'renderLayerPictures', layerArgs(ps, { budgetMs: 0 }));
+  assert.deepEqual(r.done.map(d => d.key), ['k1']);
+  assert.deepEqual(historyNow(ps), ps.before);
+});
+
+test('renderLayerPictures refuses when redo states exist and touches nothing', () => {
+  const { LM, ps } = loadHost({ history: { states: ['Open', 'Brush', 'Brush'], index: 1 } });
+  const r = call(LM, 'renderLayerPictures', layerArgs(ps));
+  assert.match(r.error, /LM_REDO_PENDING/);
+  assert.equal(ps.closedDuplicates, 0);
+  assert.deepEqual(shown(ps), []);
+});
+
+test('renderLayerPictures refuses when another document is active, instead of switching back to it', () => {
+  const { LM, ps } = loadHost();
+  const r = call(LM, 'renderLayerPictures', layerArgs(ps, { doc: { name: 'b.psb', path: 'C:\\art\\b.psb' } }));
+  assert.match(r.error, /active document changed/);
+  assert.deepEqual(shown(ps), []);
+});
+
+test('renderLayerPictures restores history when saving a unit fails', () => {
+  const { LM, ps } = loadHost({ failSave: true });
+  const r = call(LM, 'renderLayerPictures', layerArgs(ps));
+  assert.match(r.error, /save failed/);
+  assert.deepEqual(historyNow(ps), ps.before);
+  assert.equal(ps.closedDuplicates, 1);
+});
+
+test('getHistoryMark names the current state, with no id when Photoshop has none', () => {
+  const { LM } = loadHost({ history: { states: ['Open', 'Brush'], index: 1 } });
+  assert.deepEqual(JSON.parse(LM.getHistoryMark()), { id: 1001, index: 2, count: 2, name: 'Brush' });
+  const none = loadHost({ history: { states: ['Open', 'Brush'], index: 1, noId: true } });
+  assert.deepEqual(JSON.parse(none.LM.getHistoryMark()), { id: null, index: 2, count: 2, name: 'Brush' });
+});
+
 test('renderPreview refuses when redo states exist and touches nothing', () => {
   const { LM, ps } = loadHost({ width: 100, height: 100, history: { states: ['Open', 'Brush', 'Brush', 'Move', 'Brush'], index: 2 } });
   const r = call(LM, 'renderPreview', { doc: ps.docRef, on: [1], off: [2], maxSize: 1024 });

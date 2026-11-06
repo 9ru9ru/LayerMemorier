@@ -18,9 +18,22 @@ function fakeEl(width = 900, height = 700) {
     addEventListener() {},
     getBoundingClientRect: () => ({ left: 0, top: 0, width, height }),
     nextElementSibling: null,
+    appendChild() {},
   };
   Object.defineProperty(el, 'firstElementChild', { get: () => fakeEl(width, height) });
   return el;
+}
+
+function fakeCanvas(ctx) {
+  const canvas = { width: 0, height: 0, style: {} };
+  const c2d = {
+    canvas,
+    globalCompositeOperation: 'source-over',
+    clearRect() { ctx.drawLog.push(['clear']); },
+    drawImage(src) { ctx.drawLog.push([src.url || 'group', c2d.globalCompositeOperation]); },
+  };
+  canvas.getContext = () => c2d;
+  return canvas;
 }
 
 function memoryStorage() {
@@ -43,11 +56,20 @@ function loadPanel(opts = {}) {
   ctx.addEventListener = () => {};
   ctx.self = ctx;
   ctx.localStorage = opts.storage === 'throw' ? throwingStorage() : memoryStorage();
+  // 문서에 건 리스너를 모아 둔다. 테스트가 입력 이벤트를 직접 흘려보낼 수 있게 (fireDoc).
+  ctx.docListeners = {};
   ctx.document = {
-    addEventListener() {},
+    addEventListener(type, fn) { (ctx.docListeners[type] = ctx.docListeners[type] || []).push(fn); },
     getElementById: () => fakeEl(),
     querySelector: () => fakeEl(),
     querySelectorAll: () => [],
+    createElement: () => fakeCanvas(ctx),
+  };
+  // 빠른 그리기 합성을 보려고 캔버스 호출을 ctx.drawLog에 남긴다. 그림은 지정 즉시 읽힌 것으로 친다.
+  ctx.drawLog = [];
+  ctx.Image = function () {
+    const img = this;
+    Object.defineProperty(img, 'src', { set(v) { img.url = v; Promise.resolve().then(() => img.onload && img.onload()); }, get() { return img.url; } });
   };
   ctx.CSInterface = function () { this.getSystemPath = () => '/ext'; this.evalScript = (s, cb) => cb('null'); this.getExtensionID = () => 'x'; };
   ctx.SystemPath = { EXTENSION: 'ext', USER_DATA: 'data' };

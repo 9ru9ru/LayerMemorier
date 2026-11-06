@@ -70,6 +70,8 @@ main.fill > .tab.active { flex: 1; min-height: 0; display: flex; flex-direction:
 .pv-body img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; }
 .pv-body.busy img { opacity: .5; }
 .pv-busy { position: absolute; left: 0; right: 0; top: 45%; text-align: center; color: #fff; text-shadow: 0 0 3px #000; }
+.pv-canvas-slot { position: absolute; top: 0; left: 0; right: 0; bottom: 0; }
+.pv-canvas-slot canvas { display: block; width: 100%; height: 100%; object-fit: contain; }
 .pv-body .err { position: relative; margin: 0; padding: 8px; background: rgba(38, 38, 38, .85); }
 .pv-head .pv-time { margin-right: 6px; color: #999; white-space: nowrap; }
 .pv-divider { flex: 0 0 4px; cursor: col-resize; background: #444; margin: 0 4px; }
@@ -81,7 +83,11 @@ main.fill > .tab.active { flex: 1; min-height: 0; display: flex; flex-direction:
 .progress > div { height: 100%; background: #4a90e2; }
 .combo-bar .preview-toggle { display: inline-flex; align-items: center; gap: 3px; margin-left: 8px; }
 .combo-bar .preview-label { font-size: 11px; margin-left: 6px; }
-.combo-bar .panel-preview-quality { margin-left: 4px; }
+.combo-bar .pv-quality { white-space: nowrap; }
+.combo-bar .pv-quality input { margin: 0 3px 0 4px; }
+.pv-quality-range { width: 110px; padding: 0; border: 0; background: transparent; }
+.pv-quality-num { width: 4em; }
+.pv-quality-px { margin-left: 6px; font-size: 11px; }
 /* 내보내기 설정 (export spec §6). Chromium 63은 flex gap을 모르므로 margin으로 띄운다. */
 .out-row { display: flex; align-items: center; flex-wrap: wrap; margin: 3px 0; }
 .out-row > * { margin: 2px 12px 2px 0; }

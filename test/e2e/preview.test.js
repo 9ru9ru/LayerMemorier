@@ -52,6 +52,29 @@ test('renderPreview at a lower quality downsizes with bilinear', () => {
   assert.ok(fs.existsSync(r.path));
 });
 
+test('renderLayerPictures saves each layer alone and leaves eyes and history untouched', () => {
+  const { args } = setup();
+  const a = args({});
+  const all = a.on.concat(a.off);
+  const layers = psCall('getLayers');
+  const target = layers.find(l => l.kind === 'layer' && CELL[l.name]);
+  assert.equal(typeof target.mode, 'string', 'getLayers reports the blend mode');
+  assert.equal(target.clipped, false, 'getLayers reports clipping');
+  const ancestors = [];
+  for (let p = target.parentId; p != null; p = layers.find(l => l.id === p).parentId) ancestors.push(p);
+  const histBefore = history();
+  const eyesBefore = eyes();
+  const r = psCall('renderLayerPictures', { doc: a.doc, all, maxSize: 1024, budgetMs: 60000, units: [{ key: 'k', on: [target.id].concat(ancestors) }] });
+  assert.deepEqual(r.done.map(d => d.key), ['k']);
+  const img = PNG.sync.read(fs.readFileSync(r.done[0].path));
+  for (const name of Object.keys(CELL)) {
+    const [col, row] = CELL[name];
+    assert.equal(pixel(img, col * 40 + 20, row * 40 + 20)[3], name === target.name ? 255 : 0, name);
+  }
+  assert.deepEqual(history(), histBefore, 'no history step left');
+  assert.deepEqual(eyes(), eyesBefore);
+});
+
 test('renderPreview with every layer off saves an empty picture', () => {
   const { args } = setup();
   const a = args({});

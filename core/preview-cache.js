@@ -66,5 +66,24 @@
     return Math.min(1, Math.max(0, Math.round(px / total * 10000) / 10000));
   }
 
-  return { createCache, createScheduler, clampSplit };
+  // 화질 칸의 값을 1~100 정수로. 숫자가 아니면(빈칸 포함) null.
+  function clampPercent(value) {
+    if (value == null || String(value).trim() === '') return null;
+    const n = Number(value);
+    if (!isFinite(n)) return null;
+    return Math.min(100, Math.max(1, Math.round(n)));
+  }
+
+  // 미리보기는 웹용 저장으로 쓰므로 가로·세로 8192px를 넘을 수 없다 (export spec §5.3).
+  const MAX_PREVIEW_SIDE = 8192;
+
+  // 원본 대비 percent일 때의 그림 크기. width·height는 호스트(renderPreview)가 maxSize로 줄인 결과와 같다.
+  function previewSize(percent, width, height) {
+    const long = Math.max(width, height);
+    const maxSize = Math.max(1, Math.min(MAX_PREVIEW_SIDE, Math.round(long * percent / 100)));
+    const k = Math.min(1, maxSize / long);
+    return { maxSize, width: Math.max(1, Math.round(width * k)), height: Math.max(1, Math.round(height * k)) };
+  }
+
+  return { createCache, createScheduler, clampSplit, clampPercent, previewSize };
 });

@@ -88,7 +88,9 @@ function loadHost(opts = {}) {
       const i = typeof h[1] === 'number' ? h[1] - 1 : history.index;
       if (!(i in history.states)) throw new Error('no such history state ' + (i + 1));
       return {
-        getInteger: k => (k === 'ItmI' ? i + 1 : history.states.length),
+        // 항목마다 고유 ID. history.noId면 포토샵에 ID 키가 없는 경우를 흉내 낸다.
+        hasKey: k => k === 'ID' && !history.noId,
+        getInteger: k => (k === 'ID' ? 1000 + i : k === 'ItmI' ? i + 1 : history.states.length),
         getString: () => history.states[i],
       };
     }
