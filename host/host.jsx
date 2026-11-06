@@ -43,16 +43,28 @@ var LM = LM || {};
     return { pong: true, version: app.version };
   });
 
+  // as('px') is only reliable in pixel units, same as withMergedDuplicate.
+  function pixelSize(d) {
+    var units = app.preferences.rulerUnits;
+    app.preferences.rulerUnits = Units.PIXELS;
+    try {
+      return { width: d.width.as('px'), height: d.height.as('px') };
+    } finally {
+      app.preferences.rulerUnits = units;
+    }
+  }
+
   LM.getDocInfo = wrap(function () {
     if (!hasDoc()) return null;
     var d = app.activeDocument;
     var p = null;
     try { p = d.fullName.fsName; } catch (e) { p = null; }
+    var size = pixelSize(d);
     return {
       name: d.name,
       path: p,
-      width: d.width.as('px'),
-      height: d.height.as('px'),
+      width: size.width,
+      height: size.height,
       saved: d.saved
     };
   });

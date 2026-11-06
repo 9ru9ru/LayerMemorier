@@ -17,6 +17,14 @@ test('host.jsx stays ES3 + ASCII', () => {
   new vm.Script(src); // 문법 오류면 throw
 });
 
+test('getDocInfo reports the size in pixels whatever the ruler units are, and leaves the ruler as it was', () => {
+  const { LM, ps } = loadHost({ width: 12000, height: 13500 });
+  ps.app.preferences.rulerUnits = 'PERCENT';
+  const info = JSON.parse(LM.getDocInfo());
+  assert.deepEqual([info.width, info.height], [12000, 13500]);
+  assert.equal(ps.app.preferences.rulerUnits, 'PERCENT');
+});
+
 test('renderPreview applies visibility, downsizes to maxSize, saves, then restores history', () => {
   const { LM, ps } = loadHost({ width: 12000, height: 13500 });
   const r = call(LM, 'renderPreview', { doc: ps.docRef, on: [1, 2], off: [3], maxSize: 1024 });

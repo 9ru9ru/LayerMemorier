@@ -30,7 +30,8 @@ function loadHost(opts = {}) {
     putUnitDouble(k, u, v) { this.data[k] = v; }
   }
 
-  function unit(v) { return { value: v, as: () => v }; }
+  // 룰러 단위가 픽셀일 때만 픽셀 값이 맞는 것으로 흉내 낸다 (그 밖에는 0.4.7에서 본 것처럼 1).
+  function unit(v) { return { value: v, as: () => (app.preferences.rulerUnits === 'PX' ? v : 1) }; }
 
   function makeDoc(name, w, h) {
     return { name, width: unit(w), height: unit(h) };
@@ -123,6 +124,7 @@ function loadHost(opts = {}) {
   });
   vm.runInContext(fs.readFileSync(HOST, 'utf8'), ctx, { filename: 'host.jsx' });
   ps.doc = doc;
+  ps.app = app;
   ps.docRef = { name: 'a.psb', path: 'C:\\art\\a.psb' };
   ps.before = { states: history.states.slice(), index: history.index };
   return { LM: ctx.LM, ps };

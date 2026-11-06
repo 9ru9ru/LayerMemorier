@@ -25,6 +25,18 @@ function setup() {
   return { docData, args };
 }
 
+test('getDocInfo reports pixels under a percent ruler and leaves the ruler as it was', () => {
+  setup();
+  psRun('app.preferences.rulerUnits = Units.PERCENT; "percent"');
+  try {
+    const info = psCall('getDocInfo');
+    assert.deepEqual([info.width, info.height], [240, 160]);
+    assert.equal(psRun('String(app.preferences.rulerUnits)'), 'Units.PERCENT');
+  } finally {
+    psRun('app.preferences.rulerUnits = Units.PIXELS; "pixels"');
+  }
+});
+
 test('renderPreview draws the variation and leaves eyes and history untouched, many times in a row', () => {
   const { docData, args } = setup();
   const vs = enumerate(docData.categories);
