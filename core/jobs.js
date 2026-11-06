@@ -38,5 +38,32 @@
     return { jobs, conflicts, warnings };
   }
 
-  return { buildJobs };
+  // 폴더 구성 미리보기 (#15): 경로 목록을 폴더별로 묶는다. 실제 내보낼 경로에서 만들므로 결과와 어긋나지 않는다.
+  // rows는 트리 순서로 {depth, name, count}, count는 그 폴더에 바로 들어가는 파일 수. rootFiles는 출력 폴더 바로 아래 파일 수.
+  function folderSummary(paths) {
+    const root = { children: new Map(), count: 0 };
+    for (const p of paths) {
+      const parts = p.split('/');
+      parts.pop();
+      let node = root;
+      for (const name of parts) {
+        // Windows 폴더 이름은 대소문자를 가리지 않으므로 디스크에서 한 폴더가 된다.
+        const key = name.toLowerCase();
+        if (!node.children.has(key)) node.children.set(key, { name, children: new Map(), count: 0 });
+        node = node.children.get(key);
+      }
+      node.count++;
+    }
+    const rows = [];
+    const walk = (node, depth) => {
+      for (const child of node.children.values()) {
+        rows.push({ depth, name: child.name, count: child.count });
+        walk(child, depth + 1);
+      }
+    };
+    walk(root, 0);
+    return { rows, rootFiles: root.count };
+  }
+
+  return { buildJobs, folderSummary };
 });

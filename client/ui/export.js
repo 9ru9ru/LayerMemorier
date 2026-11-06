@@ -83,12 +83,39 @@ LMUI.export = (() => {
     return lines.map(t => `<p class="err empty-reason">${esc(t)}</p>`).join('');
   }
 
+  // 폴더 구성 미리보기 (#15). 켜고 끈 상태는 기억한다. localStorage가 막힌 환경에서도 세션 동안은 기억한다.
+  const KEY_FOLDER_VIEW = 'lm.exportFolderView';
+  let folderViewMemory = '0';
+
+  function isFolderView() {
+    try {
+      const v = localStorage.getItem(KEY_FOLDER_VIEW);
+      if (v != null) return v === '1';
+    } catch (e) { /* 메모리 값으로 */ }
+    return folderViewMemory === '1';
+  }
+
+  function setFolderView(on) {
+    folderViewMemory = on ? '1' : '0';
+    try { localStorage.setItem(KEY_FOLDER_VIEW, folderViewMemory); } catch (e) { /* 메모리에만 */ }
+  }
+
+  function folderLines(pv) {
+    const { rows, rootFiles } = LMCore.jobs.folderSummary(pv.jobs.map(j => j.relativePath));
+    const lines = rows.map(r => '  '.repeat(r.depth) + r.name + '/' + (r.count ? `  (${r.count}개)` : ''));
+    if (rootFiles) lines.push(`출력 폴더 바로 아래  (${rootFiles}개)`);
+    return lines;
+  }
+
   function previewBlock(pv) {
     const conflicts = pv.conflicts.length ? `<p class="err conflicts">충돌: 같은 파일명이 두 번 이상 나옵니다 — ${pv.conflicts.map(esc).join(', ')}</p>` : '';
     const warnings = pv.warnings.length ? `<details class="warnings" data-open="warnings" ${openAttr('warnings', false)}><summary>경고 ${pv.warnings.length}개</summary><ul class="warn">${pv.warnings.map(w => `<li>${esc(warningText(w))}</li>`).join('')}</ul></details>` : '';
     const empty = pv.reasons ? emptyText(pv.reasons) : '';
-    return `<div class="row"><b>배리에이션 <span class="count">${pv.variations.length}</span>개</b></div>${empty}${conflicts}${warnings}
-      <div class="preview">${pv.jobs.map(j => esc(j.relativePath)).join('\n')}</div>`;
+    const folderView = isFolderView();
+    const lines = folderView ? folderLines(pv) : pv.jobs.map(j => j.relativePath);
+    return `<div class="row"><b>배리에이션 <span class="count">${pv.variations.length}</span>개</b>
+      <label title="경로 목록 대신 폴더와 폴더별 파일 수를 보여 줍니다"><input type="checkbox" class="folder-view" ${folderView ? 'checked' : ''}> 폴더 구성</label></div>${empty}${conflicts}${warnings}
+      <div class="preview">${lines.map(esc).join('\n')}</div>`;
   }
 
   function runBlock(pv) {
@@ -247,6 +274,11 @@ LMUI.export = (() => {
 
   document.addEventListener('change', async e => {
     try {
+      const folderView = e.target.closest('#tab-export input.folder-view');
+      if (folderView) {
+        setFolderView(folderView.checked);
+        return LMApp.render();
+      }
       const field = e.target.closest('#tab-export [data-field]');
       if (field) {
         const d = LMState.docData;
@@ -274,5 +306,5 @@ LMUI.export = (() => {
     LMState.exportOpen[det.dataset.open] = det.open;
   }, true);
 
-  return { render, run, preview };
+  return { render, run, preview, isFolderView, setFolderView };
 })();

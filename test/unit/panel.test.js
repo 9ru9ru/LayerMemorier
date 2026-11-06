@@ -1312,3 +1312,62 @@ test('closing keeps a stored preview for a document with a file, and forgets it 
   assert.ok(storage.getItem('lm.previewSnapshot:C:/a.psd'), 'may have been saved with the preview eyes');
   assert.equal(storage.getItem('lm.previewSnapshot:Untitled-1'), null);
 });
+
+// ---- 내보내기: 폴더 구성 미리보기 (#15) ----
+
+function folderDoc(ctx) {
+  const folder = c => Object.assign(c, { folder: true });
+  setupDoc(ctx, { categories: [folder(cat('A', ['1', '2'])), cat('B', ['x', 'y'])], combos: [], layers: [L(1, null)] });
+  ctx.LMState.docData.baseName = 'c';
+}
+const previewText = html => /<div class="preview">([\s\S]*?)<\/div>/.exec(html)[1];
+
+test('export tab shows the path list until the folder view is turned on, then folders with counts', () => {
+  const { ctx, el } = loadPanel();
+  folderDoc(ctx);
+  const e = el(900);
+  ctx.LMUI.export.render(e);
+  assert.equal(previewText(e.innerHTML).split('\n').length, 4, 'one line per file by default');
+  assert.match(previewText(e.innerHTML), /c_A1\/c_A1_Bx\.png/);
+  assert.doesNotMatch(e.innerHTML, /folder-view" checked/);
+  ctx.LMUI.export.setFolderView(true);
+  ctx.LMUI.export.render(e);
+  assert.match(e.innerHTML, /folder-view" checked/);
+  const lines = previewText(e.innerHTML).split('\n');
+  assert.equal(lines.length, 2);
+  assert.ok(lines.every(l => /\/  \(2개\)$/.test(l)), lines.join('|'));
+});
+
+test('the folder view follows "이번만 내보낼 값" and says when files sit directly in the output folder', () => {
+  const { ctx, el } = loadPanel();
+  folderDoc(ctx);
+  ctx.LMUI.export.setFolderView(true);
+  ctx.LMState.include = { A: ['1'] };
+  const e = el(900);
+  ctx.LMUI.export.render(e);
+  assert.equal(previewText(e.innerHTML).split('\n').length, 1);
+  ctx.LMState.docData.categories[0].folder = false;
+  ctx.LMUI.export.render(e);
+  assert.equal(previewText(e.innerHTML), '출력 폴더 바로 아래  (2개)');
+});
+
+test('the folder view setting is remembered across panel loads, and works when localStorage is blocked', () => {
+  const storage = memoryStorage();
+  const first = loadPanel({ storage });
+  assert.equal(first.ctx.LMUI.export.isFolderView(), false);
+  first.ctx.LMUI.export.setFolderView(true);
+  assert.equal(loadPanel({ storage }).ctx.LMUI.export.isFolderView(), true);
+  const blocked = loadPanel({ storage: 'throw' }).ctx.LMUI.export;
+  blocked.setFolderView(true);
+  assert.equal(blocked.isFolderView(), true);
+});
+
+test('conflicts still show with the folder view on', () => {
+  const { ctx, el } = loadPanel();
+  folderDoc(ctx);
+  ctx.LMState.docData.categories[1].values.forEach(v => { v.label = 'same'; });
+  ctx.LMUI.export.setFolderView(true);
+  const e = el(900);
+  ctx.LMUI.export.render(e);
+  assert.match(e.innerHTML, /충돌: 같은 파일명/);
+});

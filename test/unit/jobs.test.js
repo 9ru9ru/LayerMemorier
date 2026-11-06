@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildJobs } = require('../../core/jobs');
+const { buildJobs, folderSummary } = require('../../core/jobs');
 const { enumerate } = require('../../core/variation');
 
 function cat(id, valueIds, labelFormat = '{c}{v}', folder = false) {
@@ -92,4 +92,36 @@ test('#5 a layer only in a stale combo is counted in the unused warning', () => 
   const d = doc([{ when: { A: 'gone' }, layers: [30] }, { when: {}, layers: [11, 20, 21] }]);
   const { warnings } = buildJobs(d, layers, enumerate(categories));
   assert.deepEqual(warnings.filter(w => w.type === 'unused'), [{ type: 'unused', detail: { count: 1 } }]);
+});
+
+// ---- 폴더 구성 미리보기 (#15) ----
+
+test('folder summary groups the example of the issue: two levels with a count on the last', () => {
+  const paths = [];
+  for (const a of ['A1', 'A2']) for (const b of ['B1', 'B2', 'B3']) for (const c of ['C1', 'C2']) paths.push(`char_${a}/char_${a}_${b}/char_${a}_${b}_${c}.png`);
+  const { rows, rootFiles } = folderSummary(paths);
+  assert.equal(rootFiles, 0);
+  assert.deepEqual(rows.map(r => [r.depth, r.name, r.count]), [
+    [0, 'char_A1', 0], [1, 'char_A1_B1', 2], [1, 'char_A1_B2', 2], [1, 'char_A1_B3', 2],
+    [0, 'char_A2', 0], [1, 'char_A2_B1', 2], [1, 'char_A2_B2', 2], [1, 'char_A2_B3', 2],
+  ]);
+});
+
+test('folder summary without folders says how many files sit in the output folder', () => {
+  assert.deepEqual(folderSummary(['a.png', 'b.png']), { rows: [], rootFiles: 2 });
+  assert.deepEqual(folderSummary([]), { rows: [], rootFiles: 0 });
+});
+
+test('folder summary counts files beside subfolders, keeps a folder together, and ignores letter case like Windows', () => {
+  const { rows, rootFiles } = folderSummary(['A/x.png', 'B/y.png', 'A/C/z.png', 'a/w.png', 'r.png']);
+  assert.equal(rootFiles, 1);
+  assert.deepEqual(rows.map(r => [r.depth, r.name, r.count]), [[0, 'A', 2], [1, 'C', 1], [0, 'B', 1]]);
+});
+
+test('folder summary follows the folder checks and the real paths of buildJobs', () => {
+  const cats = [cat('A', ['a0', 'a1'], '{c}{v}', true), cat('B', ['b0', 'b1'], '{v}', false)];
+  const d = doc([], { categories: cats });
+  const paths = buildJobs(d, layers, enumerate(cats, { include: { A: ['a1'] } })).jobs.map(j => j.relativePath);
+  const { rows } = folderSummary(paths);
+  assert.deepEqual(rows.map(r => [r.name, r.count]), [['fx_A1', 2]]);
 });

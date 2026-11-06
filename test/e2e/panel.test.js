@@ -1134,3 +1134,31 @@ test('photoshop preview left on survives reopening the panel, and turning it off
     p.close();
   }
 });
+
+test('export tab: the folder view shows the same folders and counts as the exported files (#15)', async () => {
+  const DEST = path.join(__dirname, '..', 'out', 'panel-folder-view');
+  fs.rmSync(DEST, { recursive: true, force: true });
+  const { byName } = buildFixture();
+  psCall('writeDocData', docDataFor(byName, DEST.replace(/\\/g, '/')));
+  const p = await freshPanel();
+  const previewLines = async () => (await p.eval(`document.querySelector('#tab-export .preview').textContent`)).split('\n');
+  try {
+    await p.eval(`localStorage.removeItem('lm.exportFolderView'); document.querySelector('#tabs [data-tab=export]').click(); true`);
+    assert.equal((await previewLines()).length, 12, 'the path list by default');
+    await p.eval(`document.querySelector('#tab-export input.folder-view').click(); true`);
+    await settle();
+    const lines = await previewLines();
+    await p.shot('panel-folder-view');
+    await p.eval('LMUI.export.run()');
+    assert.deepEqual((await p.eval('LMState.summary')).failures, []);
+    const disk = fs.readdirSync(DEST).map(dir => `${dir}/  (${fs.readdirSync(path.join(DEST, dir)).length}개)`);
+    assert.deepEqual(lines.slice().sort(), disk.sort());
+    await p.eval(`document.querySelector('#tab-export input.folder-view').click(); true`);
+    await settle();
+    assert.equal((await previewLines()).length, 12, 'turning it off brings the path list back');
+  } finally {
+    await p.eval(`localStorage.removeItem('lm.exportFolderView'); true`).catch(() => {});
+    clearExportDefaults();
+    p.close();
+  }
+});
