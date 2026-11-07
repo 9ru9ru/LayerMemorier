@@ -1453,3 +1453,84 @@ test('two fixed categories with a chosen target copy only the matching variation
   assert.deepEqual(bulkOn(ctx, { A: 'A2', B: 'B1' }), []);
   assert.deepEqual(bulkOn(ctx, { A: 'A2', B: 'B3' }), []);
 });
+
+// ---- 패널이 만든 히스토리 단계는 작업자의 수정이 아니다 (포토샵 미리보기, 내보내기) ----
+
+// 6개 조합이 모두 레이어 1~6을 켠다. 포토샵의 applyVisibility·exportOne처럼 단계를 만드는 호출은 히스토리 id를 올린다.
+async function ownStepsPanel(selected) {
+  const { ctx } = loadPanel({ files: {} });
+  const combos = [];
+  for (const a of ['A1', 'A2']) for (const b of ['B1', 'B2', 'B3']) combos.push({ when: { A: a, B: b }, layers: [1, 2, 3, 4, 5, 6] });
+  const M = id => Object.assign(L(id, null), { mode: 'normal', clipped: false });
+  setupDoc(ctx, { categories: [cat('A', ['A1', 'A2']), cat('B', ['B1', 'B2', 'B3'])], combos, layers: [6, 5, 4, 3, 2, 1].map(M) });
+  ctx.LMState.docData.destination = 'C:/out';
+  ctx.LMState.selectedIds = selected;
+  ctx.LMState.combo = { A: 'A1', B: 'B1' };
+  ctx.LMPanelPreview.setOn(true);
+  ctx.LMPanelPreview.setFast(true);
+  const host = { mark: { id: 10, index: 30, count: 30, name: 'Brush', saved: true, stamp: 'S' }, extracted: [] };
+  const step = name => { host.mark = Object.assign({}, host.mark, { id: host.mark.id + 1, name }); };
+  host.edit = () => step('Brush');
+  ctx.LMHost.call = async (fn, arg) => {
+    if (fn === 'getHistoryMark') return host.mark;
+    if (fn === 'applyVisibility' || fn === 'exportOne') { step('LayerMemorier'); return { ok: true, path: arg.path }; }
+    if (fn === 'renderLayerPictures') {
+      for (const u of arg.units) host.extracted.push(arr(u.on).join('+'));
+      const done = arr(arg.units).map(u => ({ key: u.key, path: `C:/t/u${arr(u.on).join('_')}_${host.extracted.length}.png` }));
+      for (const d of done) ctx.cepFiles[d.path] = '';
+      return { done, ms: 1 };
+    }
+    if (fn === 'getLayers') return ctx.LMState.layers.map(l => Object.assign({}, l));
+    if (fn === 'getDocInfo') return ctx.LMState.docInfo;
+    if (fn === 'getOpenDocKeys') return [ctx.LMState.docKey];
+    if (fn === 'getSelectedLayerIds') return ctx.LMState.selectedIds;
+    if (fn === 'readDocData') return JSON.parse(JSON.stringify(ctx.LMState.docData));
+    return { ok: true };
+  };
+  ctx.LMApp.status = () => {};
+  await ctx.LMPanelPreview.prepareAll();
+  await settle();
+  host.extracted.length = 0;
+  return { ctx, host };
+}
+
+async function browseCombos(ctx) {
+  for (const a of ['A1', 'A2']) for (const b of ['B1', 'B2', 'B3']) {
+    ctx.LMState.combo = { A: a, B: b };
+    await ctx.LMUI.layers.afterComboChange();
+    await settle();
+  }
+}
+
+test('browsing combos with the photoshop preview on keeps the prepared pictures, even with every layer selected', async () => {
+  const { ctx, host } = await ownStepsPanel([1, 2, 3, 4, 5, 6]);
+  await ctx.LMPreview.enable();
+  await browseCombos(ctx);
+  await ctx.LMPreview.disable();
+  await ctx.LMPanelPreview.request(false);
+  await settle();
+  assert.deepEqual(host.extracted, [], 'the preview\'s own history steps are not edits');
+});
+
+test('an edit made before the photoshop preview changes the eyes still counts', async () => {
+  const { ctx, host } = await ownStepsPanel([3]);
+  await ctx.LMPreview.enable();
+  host.edit();
+  ctx.LMState.combo = { A: 'A2', B: 'B1' };
+  await ctx.LMUI.layers.afterComboChange();
+  await settle();
+  assert.deepEqual(host.extracted, ['3'], 'the selected layer is extracted again, once');
+  await browseCombos(ctx);
+  assert.deepEqual(host.extracted, ['3']);
+});
+
+test('exporting keeps the prepared pictures', async () => {
+  const { ctx, host } = await ownStepsPanel([2]);
+  ctx.LMState.tab = 'export';
+  await ctx.LMUI.export.run();
+  assert.equal(ctx.LMState.summary.succeeded, 6);
+  ctx.LMState.tab = 'layers';
+  await ctx.LMPanelPreview.request(false);
+  await settle();
+  assert.deepEqual(host.extracted, [], 'the export\'s own history steps are not edits');
+});

@@ -1190,3 +1190,33 @@ test('layer tab: bulk copy through the panel moves the combos and stores them in
     p.close();
   }
 });
+
+test('fast preview: browsing combos with the photoshop preview on keeps the prepared pictures, with every layer selected', async () => {
+  const { byName, layers } = buildFixture();
+  psCall('writeDocData', docDataFor(byName));
+  const p = await freshPanel();
+  try {
+    await p.eval(`(async () => { LMPanelPreview.setOn(true); LMPanelPreview.setFast(true); document.querySelector('#tabs [data-tab=layers]').click(); await LMPanelPreview.prepareAll(); })()`, 120000);
+    psCall('selectLayers', layers.map(l => l.id));
+    await p.eval('LMApp.refresh()');
+    assert.equal(await p.eval('LMState.selectedIds.length'), layers.length);
+    const historyBefore = psCall('getHistoryMark').id;
+    await p.eval(`window.__rendered = 0; window.__origLMHostCall = LMHost.call; LMHost.call = (f, a, t) => { if (f === 'renderLayerPictures') window.__rendered++; return window.__origLMHostCall(f, a, t); }; true`);
+    await p.eval(`document.querySelector('#tab-layers input.preview-switch').click(); true`);
+    await settle();
+    for (const a of ['a0', 'a1']) for (const b of ['b0', 'b1', 'b2']) {
+      await p.eval(pickCombo('cA', a));
+      await p.eval(pickCombo('cB', b));
+      await settle();
+    }
+    await p.eval(`document.querySelector('#tab-layers input.preview-switch').click(); true`);
+    await settle();
+    await p.eval('LMPanelPreview.request(false)', 60000);
+    assert.notEqual(psCall('getHistoryMark').id, historyBefore, 'the photoshop preview did make history steps');
+    assert.equal(await p.eval('window.__rendered'), 0, 'those steps are not edits, so nothing is extracted again');
+  } finally {
+    await p.eval(`if (window.__origLMHostCall) { LMHost.call = window.__origLMHostCall; delete window.__origLMHostCall; } localStorage.removeItem('lm.panelPreview'); localStorage.removeItem('lm.previewFast'); true`).catch(() => {});
+    await p.reload();
+    p.close();
+  }
+});

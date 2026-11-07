@@ -352,6 +352,23 @@ const LMPanelPreview = (() => {
     return true;
   }
 
+  // 패널이 원본에 히스토리 단계를 만들 때(포토샵 미리보기, 내보내기) 앞뒤로 부른다. 그 단계는 작업자의 수정이 아닌데,
+  // 수정으로 보면 넘겨 보는 조합마다 선택 레이어의 그림을 다시 뽑는다.
+  // before는 그 전의 수정을 먼저 반영하고 세션을 돌려준다. after는 단계를 만든 뒤의 히스토리를 그 세션의 기준으로 삼는다.
+  async function beforeOwnSteps() {
+    const s = sessions.get(LMState.docKey) || null;
+    if (s) await checkChanges(true);
+    return s;
+  }
+
+  async function afterOwnSteps(s) {
+    if (!s || !s.mark || sessions.get(LMState.docKey) !== s) return;
+    try {
+      const now = await LMHost.call('getHistoryMark');
+      if (now) s.mark = now;
+    } catch (e) { /* 다음 확인 때 수정으로 칠 뿐이다 */ }
+  }
+
   async function requestFast(t, force) {
     const s = session();
     state.label = t.label;
@@ -652,5 +669,5 @@ const LMPanelPreview = (() => {
     attachCanvas();
   }
 
-  return { isOn, setOn, ratio, setRatio, isFast, setFast, percent, setPercent, fastHtml, qualityHtml, showPercent, attachCanvas, onHover, onSaved, onClosed, prune, isPreparing, prepareAll, cancelPrepare, request, onRefresh, paneHtml, state };
+  return { isOn, setOn, ratio, setRatio, isFast, setFast, percent, setPercent, fastHtml, qualityHtml, showPercent, attachCanvas, onHover, onSaved, onClosed, beforeOwnSteps, afterOwnSteps, prune, isPreparing, prepareAll, cancelPrepare, request, onRefresh, paneHtml, state };
 })();

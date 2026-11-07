@@ -157,6 +157,8 @@ LMUI.export = (() => {
     // 포토샵이 다른 문서로 바뀌어도 이 문서로 돌아와서 이어 가도록 매번 같이 보낸다 (리뷰 M9).
     const doc = { name: LMState.docInfo.name, path: LMState.docInfo.path || null };
     const fast = LMCore.output.isFastPath(output);
+    // 내보내기가 원본에 만드는 히스토리 단계를 빠른 그리기가 작업자의 수정으로 보지 않게 한다.
+    const own = await LMPanelPreview.beforeOwnSteps();
     LMState.exporting = true; LMState.abort = false; LMState.summary = null;
     const failures = [];
     let done = 0;
@@ -221,6 +223,7 @@ LMUI.export = (() => {
     } finally {
       try { await LMHost.call('exportEnd', { doc }); } catch (e) { failures.push({ path: '(복원)', error: e.message }); }
       LMState.exporting = false;
+      await LMPanelPreview.afterOwnSteps(own);
       LMState.summary = { done, succeeded, renamed, failures, aborted: LMState.abort };
       LMState.progress = null;
       try { LMExportDefaults.save(output); } catch (e) { LMApp.status(e.message); }
